@@ -1,0 +1,939 @@
+import sqlite3 from 'sqlite3';
+import { promisify } from 'util';
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
+
+let db;
+
+// Инициализация базы данных
+export async function initDatabase() {
+  return new Promise((resolve, reject) => {
+    // Создаем папку data если её нет
+    const dataDir = path.dirname(process.env.DATABASE_PATH || './data/subscriptions.db');
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+
+    db = new sqlite3.Database(process.env.DATABASE_PATH || './data/subscriptions.db', (err) => {
+      if (err) {
+        console.error('Ошибка подключения к базе данных:', err);
+        reject(err);
+        return;
+      }
+      
+      console.log('✅ Подключение к базе данных установлено');
+      
+      // Создаем таблицы
+      db.serialize(() => {
+        // Таблица пользователей
+        db.run(`
+          CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY,
+            telegram_id INTEGER UNIQUE NOT NULL,
+            username TEXT,
+            first_name TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            last_activity DATETIME DEFAULT CURRENT_TIMESTAMP
+          )
+        `);
+
+        // Таблица подписок
+        db.run(`
+          CREATE TABLE IF NOT EXISTS subscriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            plan_type TEXT NOT NULL, -- 'monthly' или 'yearly'
+            status TEXT NOT NULL DEFAULT 'pending', -- 'pending', 'active', 'expired', 'cancelled'
+            start_date DATETIME,
+            end_date DATETIME,
+            payment_id TEXT,
+            amount REAL,
+            access_token TEXT UNIQUE, -- уникальный токен доступа
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+          )
+        `);
+
+        // Миграция: добавляем колонку access_token если её нет
+        db.run(`PRAGMA table_info(subscriptions)`, (err, rows) => {
+          if (!err) {
+            // Проверяем, есть ли колонка access_token
+            db.all(`PRAGMA table_info(subscriptions)`, (pragmaErr, columns) => {
+              if (!pragmaErr && columns) {
+                const hasAccessToken = columns.some(col => col.name === 'access_token');
+                
+                if (!hasAccessToken) {
+                  // Добавляем колонку без UNIQUE ограничения (так как SQLite не поддерживает добавление UNIQUE через ALTER)
+                  db.run(`ALTER TABLE subscriptions ADD COLUMN access_token TEXT`, (alterErr) => {
+                    if (alterErr) {
+                      console.log('Ошибка добавления колонки access_token:', alterErr.message);
+                    } else {
+                      console.log('✅ Добавлена колонка access_token в таблицу subscriptions');
+                    }
+                  });
+                } else {
+                  console.log('✅ Колонка access_token уже существует');
+                }
+              }
+            });
+          }
+        });
+
+        // Миграция: добавляем колонку agreement_accepted в таблицу users
+        db.all(`PRAGMA table_info(users)`, (pragmaErr, columns) => {
+          if (!pragmaErr && columns) {
+            const hasAgreementAccepted = columns.some(col => col.name === 'agreement_accepted');
+            
+            if (!hasAgreementAccepted) {
+              db.run(`ALTER TABLE users ADD COLUMN agreement_accepted BOOLEAN DEFAULT 0`, (alterErr) => {
+                if (alterErr) {
+                  console.log('Ошибка добавления колонки agreement_accepted:', alterErr.message);
+                } else {
+                  console.log('✅ Добавлена колонка agreement_accepted в таблицу users');
+                }
+              });
+            } else {
+              console.log('✅ Колонка agreement_accepted уже существует');
+            }
+          }
+        });
+
+        // Таблица платежей
+        db.run(`
+          CREATE TABLE IF NOT EXISTS payments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            subscription_id INTEGER,
+            yookassa_payment_id TEXT UNIQUE NOT NULL,
+            amount REAL NOT NULL,
+            currency TEXT DEFAULT 'RUB',
+            status TEXT NOT NULL, -- 'pending', 'succeeded', 'cancelled'
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id),
+            FOREIGN KEY (subscription_id) REFERENCES subscriptions (id)
+          )
+        `);
+
+        // Таблица фитнес показателей
+        db.run(`
+          CREATE TABLE IF NOT EXISTS fitness_metrics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            metric_type TEXT NOT NULL, -- 'weight', 'body_fat', 'muscle_mass', 'workout_duration', 'calories_burned'
+            value REAL NOT NULL,
+            unit TEXT NOT NULL, -- 'kg', '%', 'minutes', 'kcal'
+            notes TEXT,
+            recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+          )
+        `);
+
+        // Таблица тренировок
+        db.run(`
+          CREATE TABLE IF NOT EXISTS workouts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            workout_type TEXT NOT NULL, -- 'strength', 'cardio', 'flexibility', 'mixed'
+            duration_minutes INTEGER,
+            calories_burned INTEGER,
+            intensity_level TEXT, -- 'low', 'medium', 'high'
+            exercises_count INTEGER,
+            notes TEXT,
+            completed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+          )
+        `);
+
+        // Таблица целей пользователя
+        db.run(`
+          CREATE TABLE IF NOT EXISTS user_goals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            goal_type TEXT NOT NULL, -- 'weight_loss', 'muscle_gain', 'endurance', 'strength'
+            target_value REAL,
+            current_value REAL,
+            target_date DATE,
+            status TEXT DEFAULT 'active', -- 'active', 'achieved', 'paused'
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+          )
+        `);
+
+        // Таблица спортивных показателей
+        db.run(`
+          CREATE TABLE IF NOT EXISTS fitness_metrics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            metric_type TEXT NOT NULL, -- 'weight', 'body_fat', 'muscle_mass', 'calories_burned', 'workout_duration'
+            value REAL NOT NULL,
+            unit TEXT NOT NULL, -- 'kg', '%', 'calories', 'minutes'
+            recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            notes TEXT,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+          )
+        `);
+
+        // Таблица тренировок
+        db.run(`
+          CREATE TABLE IF NOT EXISTS workouts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            workout_type TEXT NOT NULL, -- 'strength', 'cardio', 'yoga', 'other'
+            duration_minutes INTEGER,
+            calories_burned INTEGER,
+            exercises_count INTEGER,
+            intensity_level INTEGER, -- 1-5
+            notes TEXT,
+            workout_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+          )
+        `);
+
+        // Таблица упражнений в тренировке
+        db.run(`
+          CREATE TABLE IF NOT EXISTS workout_exercises (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            workout_id INTEGER NOT NULL,
+            exercise_name TEXT NOT NULL,
+            sets INTEGER,
+            reps INTEGER,
+            weight_kg REAL,
+            duration_seconds INTEGER,
+            calories_burned INTEGER,
+            FOREIGN KEY (workout_id) REFERENCES workouts (id)
+          )
+        `);
+
+        // Таблица достижений
+        db.run(`
+          CREATE TABLE IF NOT EXISTS achievements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            achievement_type TEXT NOT NULL, -- 'weight_loss', 'strength_gain', 'workout_streak', 'goal_reached'
+            title TEXT NOT NULL,
+            description TEXT,
+            icon TEXT, -- emoji или название иконки
+            achieved_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+          )
+        `);
+
+        console.log('✅ Таблицы базы данных созданы');
+        resolve();
+      });
+    });
+  });
+}
+
+// Создание или обновление пользователя
+export async function createOrUpdateUser(telegramUser) {
+  return new Promise((resolve, reject) => {
+    const { id, username, first_name } = telegramUser;
+    
+    // Сначала пытаемся создать пользователя
+    db.run(
+      `INSERT OR IGNORE INTO users (telegram_id, username, first_name, created_at, last_activity) 
+       VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      [id, username, first_name],
+      function(insertErr) {
+        if (insertErr) {
+          reject(insertErr);
+          return;
+        }
+        
+        // Затем обновляем информацию (если пользователь уже существовал)
+        db.run(
+          `UPDATE users 
+           SET username = ?, first_name = ?, last_activity = CURRENT_TIMESTAMP 
+           WHERE telegram_id = ?`,
+          [username, first_name, id],
+          function(updateErr) {
+            if (updateErr) {
+              reject(updateErr);
+              return;
+            }
+            
+            // Получаем ID пользователя
+            db.get(
+              `SELECT id FROM users WHERE telegram_id = ?`,
+              [id],
+              (selectErr, row) => {
+                if (selectErr) {
+                  reject(selectErr);
+                  return;
+                }
+                resolve(row ? row.id : this.lastID);
+              }
+            );
+          }
+        );
+      }
+    );
+  });
+}
+
+// Получение пользователя по Telegram ID
+export async function getUserByTelegramId(telegramId) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      'SELECT * FROM users WHERE telegram_id = ?',
+      [telegramId],
+      (err, row) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve(row);
+      }
+    );
+  });
+}
+
+// Обновление статуса согласия с пользовательским соглашением
+export async function updateUserAgreement(telegramId, accepted = true) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      'UPDATE users SET agreement_accepted = ? WHERE telegram_id = ?',
+      [accepted ? 1 : 0, telegramId],
+      function(err) {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve(this.changes > 0);
+      }
+    );
+  });
+}
+
+// Получение активной подписки пользователя
+export async function getActiveSubscription(userId) {
+  return new Promise((resolve, reject) => {
+    // userId может быть как внутренним ID, так и telegramId
+    // Проверяем по обоим полям для совместимости
+    
+    // Сначала посмотрим все подписки пользователя для отладки
+    db.all(
+      `SELECT s.* FROM subscriptions s 
+       JOIN users u ON s.user_id = u.id 
+       WHERE u.id = ? OR u.telegram_id = ?`,
+      [userId, userId],
+      (err, rows) => {
+        if (err) {
+          console.error('Error getting all subscriptions:', err);
+        } else {
+          console.log(`All subscriptions for user ${userId}:`, rows);
+        }
+      }
+    );
+    
+    db.get(
+      `SELECT s.* FROM subscriptions s 
+       JOIN users u ON s.user_id = u.id 
+       WHERE (u.id = ? OR u.telegram_id = ?) 
+       AND s.status = 'active' 
+       AND datetime(s.end_date) > datetime('now')
+       ORDER BY s.end_date DESC LIMIT 1`,
+      [userId, userId],
+      (err, row) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        console.log(`Active subscription query result for user ${userId}:`, row);
+        resolve(row);
+      }
+    );
+  });
+}
+
+// Создание новой подписки
+export async function createSubscription(telegramId, planType, amount, paymentId) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      // Сначала получаем внутренний ID пользователя
+      let user = await getUserByTelegramId(telegramId);
+      
+      // Если пользователь не найден, создаем его
+      if (!user) {
+        console.log(`Пользователь ${telegramId} не найден, создаем нового`);
+        await createOrUpdateUser({
+          id: telegramId,
+          username: null,
+          first_name: 'Unknown User'
+        });
+        user = await getUserByTelegramId(telegramId);
+        
+        if (!user) {
+          reject(new Error('Не удалось создать пользователя'));
+          return;
+        }
+      }
+      
+      const userId = user.id;
+      const endDate = new Date();
+      if (planType === 'monthly') {
+        endDate.setMonth(endDate.getMonth() + 1);
+      } else if (planType === 'yearly') {
+        endDate.setFullYear(endDate.getFullYear() + 1);
+      }
+
+      // Сначала создаем подписку без access_token
+      db.run(
+        `INSERT INTO subscriptions (user_id, plan_type, status, start_date, end_date, payment_id, amount)
+         VALUES (?, ?, 'pending', CURRENT_TIMESTAMP, ?, ?, ?)`,
+        [userId, planType, endDate.toISOString(), paymentId, amount],
+        function(err) {
+          if (err) {
+            reject(err);
+            return;
+          }
+          
+          const subscriptionId = this.lastID;
+          
+          // Генерируем уникальный токен доступа
+          const accessToken = generateAccessToken(userId, paymentId);
+          
+          // Обновляем подписку, добавляя access_token
+          db.run(
+            `UPDATE subscriptions SET access_token = ? WHERE id = ?`,
+            [accessToken, subscriptionId],
+            function(updateErr) {
+              if (updateErr) {
+                console.log('Предупреждение: не удалось добавить access_token:', updateErr.message);
+                // Не прерываем выполнение, так как подписка уже создана
+              }
+            resolve(subscriptionId);
+          }
+        );
+      }
+    );
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+// Генерация токена доступа
+function generateAccessToken(userId, paymentId) {
+  const timestamp = Date.now();
+  const data = `${userId}-${paymentId}-${timestamp}-${process.env.YOOKASSA_SECRET_KEY}`;
+  return crypto.createHash('sha256').update(data).digest('hex').substring(0, 32);
+}
+
+// Активация подписки
+export async function activateSubscription(paymentId, planType = null) {
+  return new Promise((resolve, reject) => {
+    if (paymentId.startsWith('test_')) {
+      // Тестовая активация - находим подписку по payment_id и активируем её
+      db.get(
+        `SELECT s.*, u.telegram_id 
+         FROM subscriptions s 
+         JOIN users u ON s.user_id = u.id 
+         WHERE s.payment_id = ?`,
+        [paymentId],
+        (err, subscription) => {
+          if (err) {
+            reject(err);
+            return;
+          }
+          
+          if (!subscription) {
+            reject(new Error('Подписка не найдена'));
+            return;
+          }
+          
+          const endDate = new Date();
+          if (subscription.plan_type === 'yearly') {
+            endDate.setFullYear(endDate.getFullYear() + 1);
+          } else {
+            endDate.setMonth(endDate.getMonth() + 1);
+          }
+          
+          const accessToken = generateAccessToken(subscription.user_id, paymentId);
+          
+          db.run(
+            `UPDATE subscriptions 
+             SET status = 'active', 
+                 start_date = CURRENT_TIMESTAMP,
+                 end_date = ?,
+                 access_token = ?,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?`,
+            [endDate.toISOString(), accessToken, subscription.id],
+            function(updateErr) {
+              if (updateErr) {
+                reject(updateErr);
+                return;
+              }
+              console.log(`✅ Тестовая подписка ${subscription.id} активирована для пользователя ${subscription.telegram_id}`);
+              resolve(this.changes > 0);
+            }
+          );
+        }
+      );
+    } else {
+      // Обычная активация
+      db.run(
+        `UPDATE subscriptions 
+         SET status = 'active', updated_at = CURRENT_TIMESTAMP 
+         WHERE payment_id = ?`,
+        [paymentId],
+        function(err) {
+          if (err) {
+            reject(err);
+            return;
+          }
+          resolve(this.changes > 0);
+        }
+      );
+    }
+  });
+}
+
+// Создание записи о платеже
+export async function createPayment(userId, subscriptionId, yookassaPaymentId, amount, status = 'pending') {
+  return new Promise((resolve, reject) => {
+    db.run(
+      `INSERT INTO payments (user_id, subscription_id, yookassa_payment_id, amount, status)
+       VALUES (?, ?, ?, ?, ?)`,
+      [userId, subscriptionId, yookassaPaymentId, amount, status],
+      function(err) {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve(this.lastID);
+      }
+    );
+  });
+}
+
+// Обновление статуса платежа
+export async function updatePaymentStatus(yookassaPaymentId, status) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      `UPDATE payments 
+       SET status = ?, updated_at = CURRENT_TIMESTAMP 
+       WHERE yookassa_payment_id = ?`,
+      [status, yookassaPaymentId],
+      function(err) {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve(this.changes > 0);
+      }
+    );
+  });
+}
+
+// Проверка истёкших подписок
+export async function checkExpiredSubscriptions() {
+  return new Promise((resolve, reject) => {
+    db.run(
+      `UPDATE subscriptions 
+       SET status = 'expired', updated_at = CURRENT_TIMESTAMP 
+       WHERE status = 'active' AND end_date < CURRENT_TIMESTAMP`,
+      function(err) {
+        if (err) {
+          reject(err);
+          return;
+        }
+        console.log(`Обновлено ${this.changes} истёкших подписок`);
+        resolve(this.changes);
+      }
+    );
+  });
+}
+
+// Получение статистики
+export async function getStats() {
+  return new Promise((resolve, reject) => {
+    db.all(
+      `SELECT 
+        (SELECT COUNT(*) FROM users) as total_users,
+        (SELECT COUNT(*) FROM subscriptions WHERE status = 'active') as active_subscriptions,
+        (SELECT COUNT(*) FROM payments WHERE status = 'succeeded') as successful_payments,
+        (SELECT SUM(amount) FROM payments WHERE status = 'succeeded') as total_revenue
+      `,
+      (err, rows) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve(rows[0]);
+      }
+    );
+  });
+}
+
+// Получение токена доступа пользователя
+export async function getUserAccessToken(userId) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      `SELECT access_token FROM subscriptions 
+       WHERE user_id = ? AND status = 'active' AND end_date > CURRENT_TIMESTAMP
+       ORDER BY end_date DESC LIMIT 1`,
+      [userId],
+      (err, row) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve(row ? row.access_token : null);
+      }
+    );
+  });
+}
+
+// Проверка валидности токена доступа
+export async function validateAccessToken(token) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      `SELECT s.*, u.telegram_id FROM subscriptions s
+       JOIN users u ON s.user_id = u.id
+       WHERE s.access_token = ? AND s.status = 'active' AND s.end_date > CURRENT_TIMESTAMP`,
+      [token],
+      (err, row) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve(row);
+      }
+    );
+  });
+}
+
+// Обновление времени последнего использования токена
+export async function updateTokenUsage(token) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      `UPDATE subscriptions 
+       SET updated_at = CURRENT_TIMESTAMP 
+       WHERE access_token = ?`,
+      [token],
+      function(err) {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve(this.changes > 0);
+      }
+    );
+  });
+}
+
+// Получение всех подписок пользователя для отладки
+export async function getAllUserSubscriptions(telegramId) {
+  return new Promise((resolve, reject) => {
+    db.all(
+      `SELECT s.* FROM subscriptions s 
+       JOIN users u ON s.user_id = u.id 
+       WHERE u.telegram_id = ?
+       ORDER BY s.created_at DESC`,
+      [telegramId],
+      (err, rows) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve(rows);
+      }
+    );
+  });
+}
+
+// ============================================
+// ФУНКЦИИ ДЛЯ АНАЛИТИКИ И МЕТРИК
+// ============================================
+
+// Добавление фитнес показателя
+export async function addFitnessMetric(userId, metricType, value, unit, notes = null, recordedAt = null) {
+  return new Promise((resolve, reject) => {
+    const query = `
+      INSERT INTO fitness_metrics (user_id, metric_type, value, unit, notes, recorded_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `;
+    
+    db.run(query, [userId, metricType, value, unit, notes, recordedAt || new Date().toISOString()], function(err) {
+      if (err) {
+        reject(err);
+        return;
+      }
+      resolve(this.lastID);
+    });
+  });
+}
+
+// Получение показателей пользователя
+export async function getUserMetrics(userId, metricType = null, limit = 50) {
+  return new Promise((resolve, reject) => {
+    let query = `
+      SELECT * FROM fitness_metrics
+      WHERE user_id = ?
+    `;
+    const params = [userId];
+    
+    if (metricType) {
+      query += ` AND metric_type = ?`;
+      params.push(metricType);
+    }
+    
+    query += ` ORDER BY recorded_at DESC LIMIT ?`;
+    params.push(limit);
+    
+    db.all(query, params, (err, rows) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      resolve(rows || []);
+    });
+  });
+}
+
+// Добавление тренировки
+export async function addWorkout(userId, workoutType, duration, caloriesBurned, intensity, exercisesCount, notes = null) {
+  return new Promise((resolve, reject) => {
+    const query = `
+      INSERT INTO workouts (user_id, workout_type, duration_minutes, calories_burned, intensity_level, exercises_count, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `;
+    
+    db.run(query, [userId, workoutType, duration, caloriesBurned, intensity, exercisesCount, notes], function(err) {
+      if (err) {
+        reject(err);
+        return;
+      }
+      resolve(this.lastID);
+    });
+  });
+}
+
+// Получение тренировок пользователя
+export async function getUserWorkouts(userId, limit = 30) {
+  return new Promise((resolve, reject) => {
+    const query = `
+      SELECT * FROM workouts
+      WHERE user_id = ?
+      ORDER BY workout_date DESC
+      LIMIT ?
+    `;
+    
+    db.all(query, [userId, limit], (err, rows) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      resolve(rows || []);
+    });
+  });
+}
+
+// Получение статистики за период
+export async function getUserStats(userId, days = 30) {
+  return new Promise((resolve, reject) => {
+    const query = `
+      SELECT 
+        COUNT(w.id) as total_workouts,
+        AVG(w.duration_minutes) as avg_duration,
+        SUM(w.calories_burned) as total_calories,
+        AVG(w.calories_burned) as avg_calories,
+        (SELECT value FROM fitness_metrics fm WHERE fm.user_id = ? AND fm.metric_type = 'weight' ORDER BY recorded_at DESC LIMIT 1) as current_weight,
+        (SELECT value FROM fitness_metrics fm WHERE fm.user_id = ? AND fm.metric_type = 'body_fat' ORDER BY recorded_at DESC LIMIT 1) as current_body_fat
+      FROM workouts w
+      WHERE w.user_id = ? AND w.completed_at >= date('now', '-' || ? || ' days')
+    `;
+    
+    db.get(query, [userId, userId, userId, days], (err, row) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      resolve(row || {});
+    });
+  });
+}
+
+// Добавление/обновление цели
+export async function setUserGoal(userId, goalType, targetValue, targetDate = null) {
+  return new Promise((resolve, reject) => {
+    // Сначала деактивируем старую цель этого типа
+    db.run(
+      `UPDATE user_goals SET status = 'replaced' WHERE user_id = ? AND goal_type = ? AND status = 'active'`,
+      [userId, goalType],
+      (err) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        
+        // Добавляем новую цель
+        const query = `
+          INSERT INTO user_goals (user_id, goal_type, target_value, target_date)
+          VALUES (?, ?, ?, ?)
+        `;
+        
+        db.run(query, [userId, goalType, targetValue, targetDate], function(insertErr) {
+          if (insertErr) {
+            reject(insertErr);
+            return;
+          }
+          resolve(this.lastID);
+        });
+      }
+    );
+  });
+}
+
+// Получение активных целей пользователя
+export async function getUserGoals(userId) {
+  return new Promise((resolve, reject) => {
+    const query = `
+      SELECT * FROM user_goals
+      WHERE user_id = ? AND status = 'active'
+      ORDER BY created_at DESC
+    `;
+    
+    db.all(query, [userId], (err, rows) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      resolve(rows || []);
+    });
+  });
+}
+
+// ===== АНАЛИТИЧЕСКИЕ ФУНКЦИИ =====
+
+// Сохранение показателя
+export async function saveFitnessMetric(userId, metricType, value, unit, notes = null) {
+  return new Promise((resolve, reject) => {
+    const query = `
+      INSERT INTO fitness_metrics (user_id, metric_type, value, unit, notes)
+      VALUES (?, ?, ?, ?, ?)
+    `;
+    
+    db.run(query, [userId, metricType, value, unit, notes], function(err) {
+      if (err) {
+        reject(err);
+        return;
+      }
+      resolve(this.lastID);
+    });
+  });
+}
+
+// Сохранение тренировки
+export async function saveWorkout(userId, workoutType, duration, calories = 0, exercisesCount = 0, intensity = 3, notes = null) {
+  return new Promise((resolve, reject) => {
+    const query = `
+      INSERT INTO workouts (user_id, workout_type, duration_minutes, calories_burned, exercises_count, intensity_level, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `;
+    
+    db.run(query, [userId, workoutType, duration, calories, exercisesCount, intensity, notes], function(err) {
+      if (err) {
+        reject(err);
+        return;
+      }
+      resolve(this.lastID);
+    });
+  });
+}
+
+// Получение истории показателей
+export async function getFitnessMetricHistory(userId, metricType, days = 30) {
+  return new Promise((resolve, reject) => {
+    const query = `
+      SELECT value, unit, recorded_at, notes
+      FROM fitness_metrics
+      WHERE user_id = ? AND metric_type = ? AND recorded_at >= date('now', '-' || ? || ' days')
+      ORDER BY recorded_at ASC
+    `;
+    
+    db.all(query, [userId, metricType, days], (err, rows) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      resolve(rows || []);
+    });
+  });
+}
+
+// Получение статистики тренировок
+export async function getWorkoutStats(userId, days = 30) {
+  return new Promise((resolve, reject) => {
+    const query = `
+      SELECT 
+        COUNT(*) as total_workouts,
+        AVG(duration_minutes) as avg_duration,
+        SUM(calories_burned) as total_calories,
+        AVG(intensity_level) as avg_intensity,
+        workout_type,
+        COUNT(*) as type_count
+      FROM workouts
+      WHERE user_id = ? AND workout_date >= date('now', '-' || ? || ' days')
+      GROUP BY workout_type
+      ORDER BY type_count DESC
+    `;
+    
+    db.all(query, [userId, days], (err, rows) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      resolve(rows || []);
+    });
+  });
+}
+
+// Получение достижений
+export async function getUserAchievements(userId) {
+  return new Promise((resolve, reject) => {
+    const query = `
+      SELECT title, description, icon, achieved_at
+      FROM achievements
+      WHERE user_id = ?
+      ORDER BY achieved_at DESC
+    `;
+    
+    db.all(query, [userId], (err, rows) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      resolve(rows || []);
+    });
+  });
+}
+
+// Добавление достижения
+export async function addAchievement(userId, type, title, description, icon = '🏆') {
+  return new Promise((resolve, reject) => {
+    const query = `
+      INSERT INTO achievements (user_id, achievement_type, title, description, icon)
+      VALUES (?, ?, ?, ?, ?)
+    `;
+    
+    db.run(query, [userId, type, title, description, icon], function(err) {
+      if (err) {
+        reject(err);
+        return;
+      }
+      resolve(this.lastID);
+    });
+  });
+}
+
+export { db };
