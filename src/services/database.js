@@ -100,6 +100,66 @@ export async function initDatabase() {
           }
         });
 
+        // Миграция: исправляем схему таблицы workouts (заменяем workout_date на completed_at)
+        db.all(`PRAGMA table_info(workouts)`, (pragmaErr, columns) => {
+          if (!pragmaErr && columns) {
+            const hasWorkoutDate = columns.some(col => col.name === 'workout_date');
+            const hasCompletedAt = columns.some(col => col.name === 'completed_at');
+            
+            if (hasWorkoutDate && !hasCompletedAt) {
+              console.log('🔄 Выполняем миграцию таблицы workouts: workout_date -> completed_at');
+              
+              // Создаем новую таблицу с правильной схемой
+              db.run(`
+                CREATE TABLE IF NOT EXISTS workouts_new (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  user_id INTEGER NOT NULL,
+                  workout_type TEXT NOT NULL,
+                  duration_minutes INTEGER,
+                  calories_burned INTEGER,
+                  intensity_level TEXT,
+                  exercises_count INTEGER,
+                  notes TEXT,
+                  completed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  FOREIGN KEY (user_id) REFERENCES users (id)
+                )
+              `, (createErr) => {
+                if (createErr) {
+                  console.log('Ошибка создания новой таблицы workouts:', createErr.message);
+                } else {
+                  // Копируем данные из старой таблицы
+                  db.run(`
+                    INSERT INTO workouts_new (id, user_id, workout_type, duration_minutes, calories_burned, intensity_level, exercises_count, notes, completed_at, created_at)
+                    SELECT id, user_id, workout_type, duration_minutes, calories_burned, intensity_level, exercises_count, notes, workout_date, workout_date FROM workouts
+                  `, (copyErr) => {
+                    if (copyErr) {
+                      console.log('Ошибка копирования данных workouts:', copyErr.message);
+                    } else {
+                      // Удаляем старую таблицу и переименовываем новую
+                      db.run(`DROP TABLE workouts`, (dropErr) => {
+                        if (dropErr) {
+                          console.log('Ошибка удаления старой таблицы workouts:', dropErr.message);
+                        } else {
+                          db.run(`ALTER TABLE workouts_new RENAME TO workouts`, (renameErr) => {
+                            if (renameErr) {
+                              console.log('Ошибка переименования таблицы workouts:', renameErr.message);
+                            } else {
+                              console.log('✅ Миграция таблицы workouts завершена успешно');
+                            }
+                          });
+                        }
+                      });
+                    }
+                  });
+                }
+              });
+            } else if (hasCompletedAt) {
+              console.log('✅ Таблица workouts уже имеет правильную схему');
+            }
+          }
+        });
+
         // Таблица платежей
         db.run(`
           CREATE TABLE IF NOT EXISTS payments (
@@ -175,22 +235,6 @@ export async function initDatabase() {
             unit TEXT NOT NULL, -- 'kg', '%', 'calories', 'minutes'
             recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             notes TEXT,
-            FOREIGN KEY (user_id) REFERENCES users (id)
-          )
-        `);
-
-        // Таблица тренировок
-        db.run(`
-          CREATE TABLE IF NOT EXISTS workouts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            workout_type TEXT NOT NULL, -- 'strength', 'cardio', 'yoga', 'other'
-            duration_minutes INTEGER,
-            calories_burned INTEGER,
-            exercises_count INTEGER,
-            intensity_level INTEGER, -- 1-5
-            notes TEXT,
-            workout_date DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users (id)
           )
         `);
@@ -724,7 +768,7 @@ export async function getUserWorkouts(userId, limit = 30) {
     const query = `
       SELECT * FROM workouts
       WHERE user_id = ?
-      ORDER BY workout_date DESC
+      ORDER BY completed_at DESC
       LIMIT ?
     `;
     
@@ -883,7 +927,7 @@ export async function getWorkoutStats(userId, days = 30) {
         workout_type,
         COUNT(*) as type_count
       FROM workouts
-      WHERE user_id = ? AND workout_date >= date('now', '-' || ? || ' days')
+      WHERE user_id = ? AND completed_at >= date('now', '-' || ? || ' days')
       GROUP BY workout_type
       ORDER BY type_count DESC
     `;

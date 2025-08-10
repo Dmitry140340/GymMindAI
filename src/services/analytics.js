@@ -171,7 +171,7 @@ export async function generateProgressChart(metrics, workouts, userId) {
   // Группируем тренировки по датам
   const workoutsByDate = {};
   workouts.forEach(workout => {
-    const date = new Date(workout.workout_date).toDateString();
+    const date = new Date(workout.completed_at).toDateString();
     workoutsByDate[date] = (workoutsByDate[date] || 0) + 1;
   });
 

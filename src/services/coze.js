@@ -277,13 +277,27 @@ export async function sendMessageToCoze(message, userId, conversationId = null) 
                   }
                 } else if (resultData?.status === 'failed') {
                   console.log('❌ Обработка чата завершилась с ошибкой');
-                  break;
+                  console.log('🔍 Детали ошибки:', JSON.stringify(resultData, null, 2));
+                  console.log('🔍 Полный ответ API:', JSON.stringify(resultResponse.data, null, 2));
+                  
+                  // Если ошибка связана с балансом токенов (код 4011) или другими критическими ошибками - используем fallback
+                  if (resultData?.last_error?.code === 4011) {
+                    console.log('💰 Недостаточный баланс CozeToken. Переключаемся на имитацию ИИ');
+                    return await simulateAIResponse(message, userId);
+                  }
+                  
+                  console.log('⚠️ Критическая ошибка Coze API. Переключаемся на имитацию ИИ');
+                  return await simulateAIResponse(message, userId);
                 }
               }
             } catch (pollError) {
               console.log('⚠️ Ошибка при проверке статуса:', pollError.message);
             }
           }
+          
+          // Если после всех попыток ответ не получен - используем fallback
+          console.log('⚠️ Coze API не ответил или завершился с ошибкой. Переключаемся на имитацию ИИ');
+          return await simulateAIResponse(message, userId);
         } else {
           // Если статус не "in_progress", обрабатываем как обычно
           const messages = response.data.data?.messages || [];

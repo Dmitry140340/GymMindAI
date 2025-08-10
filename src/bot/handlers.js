@@ -21,7 +21,6 @@ import {
   generateProgressChart, 
   generateTextReport 
 } from '../services/analytics.js';
-import { addSampleData } from '../services/sample-data.js';
 import {
   mainKeyboard,
   subscriptionKeyboard,
@@ -161,7 +160,7 @@ async function handleTextMessage(bot, msg) {
     await createOrUpdateUser(user);
     const dbUser = await getUserByTelegramId(user.id);
 
-    if (text === '🤖 Доступ к ИИ-тренеру') {
+    if (text === '🤖 ИИ-тренер') {
       // Проверяем подписку
       const subscription = await getActiveSubscription(dbUser.id);
       
@@ -346,28 +345,6 @@ async function handleTextMessage(bot, msg) {
         '🔄 Диалог с ИИ сброшен! Теперь можете начать новое общение с чистого листа.\n\n💡 Все предыдущие команды и контекст очищены.',
         mainKeyboard
       );
-      return;
-    }
-
-    // Команда добавления тестовых данных (только для разработки)
-    if (text === '/sample_data' || text === '/тестовые_данные') {
-      await bot.sendMessage(chatId, '⏳ Добавляем тестовые данные...');
-      
-      const success = await addSampleData(dbUser.id);
-      
-      if (success) {
-        await bot.sendMessage(
-          chatId,
-          '✅ Тестовые данные добавлены!\n\n📊 Теперь вы можете посмотреть графики и статистику в разделе "Аналитика".\n\n💡 Данные включают:\n• График веса за 30 дней\n• 7 тренировок разных типов\n• 3 достижения',
-          mainKeyboard
-        );
-      } else {
-        await bot.sendMessage(
-          chatId,
-          '❌ Ошибка при добавлении тестовых данных.',
-          mainKeyboard
-        );
-      }
       return;
     }
 
