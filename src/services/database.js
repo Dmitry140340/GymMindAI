@@ -81,6 +81,38 @@ export async function initDatabase() {
           }
         });
 
+        // Миграция: добавляем поля для отслеживания запросов
+        db.all(`PRAGMA table_info(subscriptions)`, (pragmaErr, columns) => {
+          if (!pragmaErr && columns) {
+            const hasRequestsLimit = columns.some(col => col.name === 'requests_limit');
+            const hasRequestsUsed = columns.some(col => col.name === 'requests_used');
+            
+            if (!hasRequestsLimit) {
+              db.run(`ALTER TABLE subscriptions ADD COLUMN requests_limit INTEGER DEFAULT 100`, (alterErr) => {
+                if (alterErr) {
+                  console.log('Ошибка добавления колонки requests_limit:', alterErr.message);
+                } else {
+                  console.log('✅ Добавлена колонка requests_limit в таблицу subscriptions');
+                }
+              });
+            } else {
+              console.log('✅ Колонка requests_limit уже существует');
+            }
+
+            if (!hasRequestsUsed) {
+              db.run(`ALTER TABLE subscriptions ADD COLUMN requests_used INTEGER DEFAULT 0`, (alterErr) => {
+                if (alterErr) {
+                  console.log('Ошибка добавления колонки requests_used:', alterErr.message);
+                } else {
+                  console.log('✅ Добавлена колонка requests_used в таблицу subscriptions');
+                }
+              });
+            } else {
+              console.log('✅ Колонка requests_used уже существует');
+            }
+          }
+        });
+
         // Миграция: добавляем колонку agreement_accepted в таблицу users
         db.all(`PRAGMA table_info(users)`, (pragmaErr, columns) => {
           if (!pragmaErr && columns) {
@@ -422,17 +454,21 @@ export async function createSubscription(telegramId, planType, amount, paymentId
       
       const userId = user.id;
       const endDate = new Date();
-      if (planType === 'monthly') {
-        endDate.setMonth(endDate.getMonth() + 1);
-      } else if (planType === 'yearly') {
-        endDate.setFullYear(endDate.getFullYear() + 1);
-      }
+      endDate.setMonth(endDate.getMonth() + 1); // Все планы на месяц
+      
+      // Определяем лимит запросов на основе плана
+      const requestsLimits = {
+        'basic': 100,
+        'standard': 300,
+        'premium': 600
+      };
+      const requestsLimit = requestsLimits[planType] || 100;
 
       // Сначала создаем подписку без access_token
       db.run(
-        `INSERT INTO subscriptions (user_id, plan_type, status, start_date, end_date, payment_id, amount)
-         VALUES (?, ?, 'pending', CURRENT_TIMESTAMP, ?, ?, ?)`,
-        [userId, planType, endDate.toISOString(), paymentId, amount],
+        `INSERT INTO subscriptions (user_id, plan_type, status, start_date, end_date, payment_id, amount, requests_limit, requests_used)
+         VALUES (?, ?, 'pending', CURRENT_TIMESTAMP, ?, ?, ?, ?, 0)`,
+        [userId, planType, endDate.toISOString(), paymentId, amount, requestsLimit],
         function(err) {
           if (err) {
             reject(err);
@@ -977,6 +1013,57 @@ export async function addAchievement(userId, type, title, description, icon = '�
       }
       resolve(this.lastID);
     });
+  });
+}
+
+// Увеличение счетчика использованных запросов
+export async function incrementRequestUsage(userId) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      `UPDATE subscriptions 
+       SET requests_used = requests_used + 1 
+       WHERE user_id = ? AND status = 'active' AND end_date > datetime('now')`,
+      [userId],
+      function(err) {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve(this.changes > 0);
+      }
+    );
+  });
+}
+
+// Проверка, может ли пользователь делать запросы
+export async function canMakeRequest(userId) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      `SELECT requests_limit, requests_used 
+       FROM subscriptions 
+       WHERE user_id = ? AND status = 'active' AND end_date > datetime('now')`,
+      [userId],
+      (err, row) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        
+        if (!row) {
+          resolve({ canMake: false, reason: 'no_subscription' });
+          return;
+        }
+        
+        const remaining = row.requests_limit - row.requests_used;
+        resolve({
+          canMake: remaining > 0,
+          remaining: remaining,
+          total: row.requests_limit,
+          used: row.requests_used,
+          reason: remaining > 0 ? null : 'limit_exceeded'
+        });
+      }
+    );
   });
 }
 

@@ -493,20 +493,28 @@ async function handleCallbackQuery(bot, callbackQuery) {
         );
         break;
 
-      case 'buy_monthly':
-        await showPaymentConfirmation(bot, chatId, messageId, 'monthly');
+      case 'buy_basic':
+        await showPaymentConfirmation(bot, chatId, messageId, 'basic');
         break;
 
-      case 'buy_yearly':
-        await showPaymentConfirmation(bot, chatId, messageId, 'yearly');
+      case 'buy_standard':
+        await showPaymentConfirmation(bot, chatId, messageId, 'standard');
         break;
 
-      case 'confirm_payment_monthly':
-        await processPayment(bot, chatId, messageId, user.id, 'monthly');
+      case 'buy_premium':
+        await showPaymentConfirmation(bot, chatId, messageId, 'premium');
         break;
 
-      case 'confirm_payment_yearly':
-        await processPayment(bot, chatId, messageId, user.id, 'yearly');
+      case 'confirm_payment_basic':
+        await processPayment(bot, chatId, messageId, user.id, 'basic');
+        break;
+
+      case 'confirm_payment_standard':
+        await processPayment(bot, chatId, messageId, user.id, 'standard');
+        break;
+
+      case 'confirm_payment_premium':
+        await processPayment(bot, chatId, messageId, user.id, 'premium');
         break;
 
       case 'subscription_status':
@@ -593,7 +601,13 @@ async function showSubscriptionMenu(bot, chatId, userId) {
     const endDate = new Date(subscription.end_date);
     const daysLeft = Math.ceil((endDate - new Date()) / (1000 * 60 * 60 * 24));
     
-    const message = `💎 Ваша подписка активна!\n\n📅 План: ${subscription.plan_type === 'monthly' ? 'Месячная' : 'Годовая'}\n⏰ До окончания: ${daysLeft} дней\n📊 Статус: Активна`;
+    const planNames = {
+      'basic': 'Базовый (100 запросов)',
+      'standard': 'Стандартный (300 запросов)', 
+      'premium': 'Премиум (600 запросов)'
+    };
+    const remaining = subscription.requests_limit - subscription.requests_used;
+    const message = `💎 Ваша подписка активна!\n\n📅 План: ${planNames[subscription.plan_type] || subscription.plan_type}\n📈 Запросы: ${subscription.requests_used}/${subscription.requests_limit} (осталось: ${remaining})\n⏰ До окончания: ${daysLeft} дней\n📊 Статус: Активна`;
     
     await bot.sendMessage(chatId, message, manageSubscriptionKeyboard);
   } else {
@@ -616,8 +630,15 @@ async function showUserProfile(bot, chatId, user) {
   if (subscription) {
     const endDate = new Date(subscription.end_date);
     const daysLeft = Math.ceil((endDate - new Date()) / (1000 * 60 * 60 * 24));
+    const planNames = {
+      'basic': 'Базовый (100 запросов)',
+      'standard': 'Стандартный (300 запросов)', 
+      'premium': 'Премиум (600 запросов)'
+    };
+    const remaining = subscription.requests_limit - subscription.requests_used;
     message += `💎 Подписка: Активна\n`;
-    message += `📊 План: ${subscription.plan_type === 'monthly' ? 'Месячная' : 'Годовая'}\n`;
+    message += `📊 План: ${planNames[subscription.plan_type] || subscription.plan_type}\n`;
+    message += `📈 Запросы: ${subscription.requests_used}/${subscription.requests_limit} (осталось: ${remaining})\n`;
     message += `⏰ Осталось дней: ${daysLeft}`;
   } else {
     message += `💎 Подписка: Не активна`;
@@ -627,11 +648,14 @@ async function showUserProfile(bot, chatId, user) {
 }
 
 async function showPaymentConfirmation(bot, chatId, messageId, planType) {
-  const price = planType === 'monthly' ? '999₽' : '9990₽';
-  const period = planType === 'monthly' ? '1 месяц' : '1 год';
-  const savings = planType === 'yearly' ? '\n💰 Экономия: 1998₽ (17%)' : '';
+  const plans = {
+    'basic': { price: '150₽', requests: '100 запросов', name: 'Базовый' },
+    'standard': { price: '300₽', requests: '300 запросов', name: 'Стандартный' },
+    'premium': { price: '450₽', requests: '600 запросов', name: 'Премиум' }
+  };
   
-  const message = `💳 Подтверждение заказа\n\n📦 Подписка: ${period}\n💰 К оплате: ${price}${savings}\n\n✅ После оплаты подписка активируется автоматически.`;
+  const plan = plans[planType];
+  const message = `💳 Подтверждение заказа\n\n📦 План: ${plan.name}\n📊 Лимит: ${plan.requests} в месяц\n💰 К оплате: ${plan.price}\n\n✅ После оплаты подписка активируется автоматически.`;
   
   await bot.editMessageText(message, {
     chat_id: chatId,
@@ -650,11 +674,15 @@ async function processPayment(bot, chatId, messageId, telegramId, planType) {
     const paymentResult = await createSubscriptionPayment(telegramId, planType);
     
     if (paymentResult.success) {
-      const price = planType === 'monthly' ? '999₽' : '9990₽';
-      const period = planType === 'monthly' ? '1 месяц' : '1 год';
+      const plans = {
+        'basic': { price: '150₽', requests: '100 запросов', name: 'Базовый' },
+        'standard': { price: '300₽', requests: '300 запросов', name: 'Стандартный' },
+        'premium': { price: '450₽', requests: '600 запросов', name: 'Премиум' }
+      };
+      const plan = plans[planType];
       
       await bot.editMessageText(
-        `💳 Оплата подписки\n\n📦 План: ${period}\n💰 Сумма: ${price}\n\n🔒 Оплата проходит через защищенный сервис ЮКасса.\n\n👆 Нажмите кнопку ниже для перехода к оплате:`,
+        `💳 Оплата подписки\n\n📦 План: ${plan.name}\n📊 Лимит: ${plan.requests} в месяц\n💰 Сумма: ${plan.price}\n\n🔒 Оплата проходит через защищенный сервис ЮКасса.\n\n👆 Нажмите кнопку ниже для перехода к оплате:`,
         {
           chat_id: chatId,
           message_id: messageId,
@@ -692,7 +720,14 @@ async function showSubscriptionStatus(bot, chatId, messageId, userId) {
     const endDate = new Date(subscription.end_date);
     const daysLeft = Math.ceil((endDate - new Date()) / (1000 * 60 * 60 * 24));
     
-    const message = `📊 Статус подписки\n\n✅ Статус: Активна\n📅 План: ${subscription.plan_type === 'monthly' ? 'Месячная' : 'Годовая'}\n🗓 Начало: ${startDate.toLocaleDateString('ru-RU')}\n📆 Окончание: ${endDate.toLocaleDateString('ru-RU')}\n⏰ Осталось дней: ${daysLeft}\n💰 Сумма: ${subscription.amount}₽`;
+    const planNames = {
+      'basic': 'Базовый (100 запросов)',
+      'standard': 'Стандартный (300 запросов)', 
+      'premium': 'Премиум (600 запросов)'
+    };
+    
+    const remaining = subscription.requests_limit - subscription.requests_used;
+    const message = `📊 Статус подписки\n\n✅ Статус: Активна\n📅 План: ${planNames[subscription.plan_type] || subscription.plan_type}\n📈 Использовано запросов: ${subscription.requests_used}/${subscription.requests_limit}\n📊 Осталось запросов: ${remaining}\n🗓 Начало: ${startDate.toLocaleDateString('ru-RU')}\n📆 Окончание: ${endDate.toLocaleDateString('ru-RU')}\n⏰ Осталось дней: ${daysLeft}\n💰 Сумма: ${subscription.amount}₽`;
     
     await bot.editMessageText(message, {
       chat_id: chatId,

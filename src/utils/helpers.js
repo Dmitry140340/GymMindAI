@@ -45,17 +45,26 @@ export function isValidEmail(email) {
 // Получение информации о плане подписки
 export function getSubscriptionPlanInfo(planType) {
   const plans = {
-    monthly: {
-      name: 'Месячная подписка',
+    basic: {
+      name: 'Базовый план',
       duration: '1 месяц',
-      price: parseFloat(process.env.MONTHLY_PRICE || '999'),
-      savings: 0
+      price: parseFloat(process.env.BASIC_PRICE || '150'),
+      requests: 100,
+      description: '100 запросов в месяц'
     },
-    yearly: {
-      name: 'Годовая подписка', 
-      duration: '1 год',
-      price: parseFloat(process.env.YEARLY_PRICE || '9990'),
-      savings: (parseFloat(process.env.MONTHLY_PRICE || '999') * 12) - parseFloat(process.env.YEARLY_PRICE || '9990')
+    standard: {
+      name: 'Стандартный план',
+      duration: '1 месяц', 
+      price: parseFloat(process.env.STANDARD_PRICE || '300'),
+      requests: 300,
+      description: '300 запросов в месяц'
+    },
+    premium: {
+      name: 'Премиум план',
+      duration: '1 месяц',
+      price: parseFloat(process.env.PREMIUM_PRICE || '450'),
+      requests: 600,
+      description: '600 запросов в месяц'
     }
   };
   

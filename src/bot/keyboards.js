@@ -60,10 +60,13 @@ export const subscriptionKeyboard = {
   reply_markup: {
     inline_keyboard: [
       [
-        { text: '📅 1 месяц - 999₽', callback_data: 'buy_monthly' }
+        { text: '🥉 Базовый - 150₽ (100 запросов)', callback_data: 'buy_basic' }
       ],
       [
-        { text: '📅 1 год - 9990₽ (-17%)', callback_data: 'buy_yearly' }
+        { text: '🥈 Стандартный - 300₽ (300 запросов)', callback_data: 'buy_standard' }
+      ],
+      [
+        { text: '🥇 Премиум - 450₽ (600 запросов)', callback_data: 'buy_premium' }
       ],
       [
         { text: '⬅️ Назад', callback_data: 'back_to_main' }

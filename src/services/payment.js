@@ -38,12 +38,15 @@ export async function createSubscriptionPayment(telegramId, planType) {
 
     // Определяем сумму и описание
     let amount, description;
-    if (planType === 'monthly') {
-      amount = parseFloat(process.env.MONTHLY_PRICE || '999');
-      description = 'Подписка на 1 месяц - FitnessBotAI';
-    } else if (planType === 'yearly') {
-      amount = parseFloat(process.env.YEARLY_PRICE || '9990');
-      description = 'Подписка на 1 год - FitnessBotAI';
+    if (planType === 'basic') {
+      amount = parseFloat(process.env.BASIC_PRICE || '150');
+      description = 'Базовый план (100 запросов) - FitnessBotAI';
+    } else if (planType === 'standard') {
+      amount = parseFloat(process.env.STANDARD_PRICE || '300');
+      description = 'Стандартный план (300 запросов) - FitnessBotAI';
+    } else if (planType === 'premium') {
+      amount = parseFloat(process.env.PREMIUM_PRICE || '450');
+      description = 'Премиум план (600 запросов) - FitnessBotAI';
     } else {
       throw new Error('Неверный тип подписки');
     }
