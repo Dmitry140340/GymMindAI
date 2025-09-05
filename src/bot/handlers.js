@@ -11,7 +11,12 @@ import {
   addAchievement,
   getUserMetrics,
   getUserWorkouts,
-  getUserAchievements
+  getUserAchievements,
+  // Импорт функций для бесплатных запросов
+  getUserFreeRequests,
+  useFreeRequest,
+  canUserMakeRequest,
+  incrementRequestUsage
 } from '../services/database.js';
 import { sendMessageToCoze, getCozeInstructions, resetUserConversation } from '../services/coze.js';
 import { createSubscriptionPayment } from '../services/payment.js';
@@ -161,31 +166,61 @@ async function handleTextMessage(bot, msg) {
     const dbUser = await getUserByTelegramId(user.id);
 
     if (text === '🤖 ИИ-тренер') {
-      // Проверяем подписку
-      const subscription = await getActiveSubscription(dbUser.id);
+      // Проверяем возможность делать запросы
+      const requestStatus = await canUserMakeRequest(dbUser.id);
       
-      if (!subscription) {
+      if (!requestStatus.canMake) {
         await bot.sendMessage(
           chatId,
-          '💎 Для доступа к ИИ-тренеру нужна активная подписка.\n\nОформите подписку, чтобы получить персональные рекомендации!',
+          '💎 У вас закончились запросы к ИИ-тренеру.\n\n' +
+          '🆓 Новые пользователи получают 7 бесплатных запросов\n' +
+          '💪 Для неограниченного доступа оформите подписку!',
           noSubscriptionKeyboard
         );
         return;
       }
 
-      // Получаем токен доступа пользователя
-      const accessToken = await getUserAccessToken(dbUser.id);
-      if (!accessToken) {
-        await bot.sendMessage(chatId, '❌ Ошибка получения токена доступа. Обратитесь в поддержку.');
-        return;
+      // Показываем информацию о доступных запросах
+      let requestInfo = '';
+      if (requestStatus.type === 'free') {
+        requestInfo = `\n\n🆓 Бесплатных запросов осталось: ${requestStatus.remaining}/7`;
+      } else if (requestStatus.type === 'subscription') {
+        requestInfo = `\n\n💎 Запросов по подписке: ${requestStatus.remaining}/${requestStatus.total}`;
       }
 
       // Активируем режим общения с ИИ
       userStates.set(user.id, 'chatting_with_ai');
       
-      // Отправляем приветствие ИИ
-      const instructions = await getCozeInstructions(accessToken);
-      await bot.sendMessage(chatId, instructions.message, { parse_mode: 'Markdown' });
+      // Пробуем получить инструкции Coze
+      try {
+        const accessToken = await getUserAccessToken(dbUser.id);
+        if (accessToken) {
+          const instructions = await getCozeInstructions(accessToken);
+          await bot.sendMessage(chatId, instructions.message + requestInfo, { parse_mode: 'Markdown' });
+        } else {
+          await bot.sendMessage(
+            chatId,
+            '🤖 *Добро пожаловать в ИИ-тренер!*\n\n' +
+            'Я помогу вам с:\n' +
+            '• Составлением программ тренировок\n' +
+            '• Советами по питанию\n' +
+            '• Вопросами о здоровье и фитнесе\n\n' +
+            'Задавайте любые вопросы!' + requestInfo,
+            { parse_mode: 'Markdown' }
+          );
+        }
+      } catch (error) {
+        await bot.sendMessage(
+          chatId,
+          '🤖 *Добро пожаловать в ИИ-тренер!*\n\n' +
+          'Я помогу вам с:\n' +
+          '• Составлением программ тренировок\n' +
+          '• Советами по питанию\n' +
+          '• Вопросами о здоровье и фитнесе\n\n' +
+          'Задавайте любые вопросы!' + requestInfo,
+          { parse_mode: 'Markdown' }
+        );
+      }
       return;
     }
 
@@ -283,13 +318,16 @@ async function handleTextMessage(bot, msg) {
 
     // Если пользователь в режиме чата с ИИ
     if (userStates.get(user.id) === 'chatting_with_ai') {
-      const subscription = await getActiveSubscription(dbUser.id);
+      // Проверяем возможность делать запросы
+      const requestStatus = await canUserMakeRequest(dbUser.id);
       
-      if (!subscription) {
+      if (!requestStatus.canMake) {
         userStates.delete(user.id);
         await bot.sendMessage(
           chatId,
-          '❌ Ваша подписка истекла. Обновите подписку для продолжения общения с ИИ.',
+          '❌ У вас закончились запросы к ИИ-тренеру.\n\n' +
+          '🆓 Бесплатные запросы: 0/7\n' +
+          '💎 Оформите подписку для продолжения!',
           noSubscriptionKeyboard
         );
         return;
@@ -311,7 +349,20 @@ async function handleTextMessage(bot, msg) {
       }
       
       if (aiResponse.success) {
-        await bot.sendMessage(chatId, aiResponse.message);
+        // Списываем запрос
+        if (requestStatus.type === 'free') {
+          await useFreeRequest(dbUser.id);
+          const freeRequests = await getUserFreeRequests(dbUser.id);
+          await bot.sendMessage(
+            chatId, 
+            aiResponse.message + `\n\n🆓 Бесплатных запросов осталось: ${freeRequests.remaining}/7`
+          );
+        } else if (requestStatus.type === 'subscription') {
+          await incrementRequestUsage(dbUser.id);
+          await bot.sendMessage(chatId, aiResponse.message);
+        } else {
+          await bot.sendMessage(chatId, aiResponse.message);
+        }
       } else {
         await bot.sendMessage(chatId, aiResponse.message);
       }
@@ -621,11 +672,15 @@ async function showSubscriptionMenu(bot, chatId, userId) {
 
 async function showUserProfile(bot, chatId, user) {
   const subscription = await getActiveSubscription(user.id);
+  const freeRequests = await getUserFreeRequests(user.id);
   
   let message = `👤 Ваш профиль\n\n`;
   message += `📛 Имя: ${user.first_name || 'Не указано'}\n`;
   message += `🆔 ID: ${user.telegram_id}\n`;
   message += `📅 Регистрация: ${new Date(user.created_at).toLocaleDateString('ru-RU')}\n\n`;
+  
+  // Показываем бесплатные запросы
+  message += `🆓 Бесплатные запросы: ${freeRequests.used}/${freeRequests.total} (осталось: ${freeRequests.remaining})\n\n`;
   
   if (subscription) {
     const endDate = new Date(subscription.end_date);

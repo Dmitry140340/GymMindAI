@@ -113,6 +113,38 @@ export async function initDatabase() {
           }
         });
 
+        // Миграция: добавляем поля для бесплатных запросов в таблицу users
+        db.all(`PRAGMA table_info(users)`, (pragmaErr, columns) => {
+          if (!pragmaErr && columns) {
+            const hasFreeRequestsLimit = columns.some(col => col.name === 'free_requests_limit');
+            const hasFreeRequestsUsed = columns.some(col => col.name === 'free_requests_used');
+            
+            if (!hasFreeRequestsLimit) {
+              db.run(`ALTER TABLE users ADD COLUMN free_requests_limit INTEGER DEFAULT 7`, (alterErr) => {
+                if (alterErr) {
+                  console.log('Ошибка добавления колонки free_requests_limit:', alterErr.message);
+                } else {
+                  console.log('✅ Добавлена колонка free_requests_limit в таблицу users');
+                }
+              });
+            } else {
+              console.log('✅ Колонка free_requests_limit уже существует');
+            }
+
+            if (!hasFreeRequestsUsed) {
+              db.run(`ALTER TABLE users ADD COLUMN free_requests_used INTEGER DEFAULT 0`, (alterErr) => {
+                if (alterErr) {
+                  console.log('Ошибка добавления колонки free_requests_used:', alterErr.message);
+                } else {
+                  console.log('✅ Добавлена колонка free_requests_used в таблицу users');
+                }
+              });
+            } else {
+              console.log('✅ Колонка free_requests_used уже существует');
+            }
+          }
+        });
+
         // Миграция: добавляем колонку agreement_accepted в таблицу users
         db.all(`PRAGMA table_info(users)`, (pragmaErr, columns) => {
           if (!pragmaErr && columns) {
@@ -1064,6 +1096,104 @@ export async function canMakeRequest(userId) {
         });
       }
     );
+  });
+}
+
+// Получение информации о бесплатных запросах пользователя
+export async function getUserFreeRequests(userId) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      `SELECT free_requests_limit, free_requests_used 
+       FROM users 
+       WHERE id = ?`,
+      [userId],
+      (err, row) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        
+        if (!row) {
+          resolve({ remaining: 0, total: 7, used: 0 });
+          return;
+        }
+        
+        const total = row.free_requests_limit || 7;
+        const used = row.free_requests_used || 0;
+        const remaining = Math.max(0, total - used);
+        
+        resolve({
+          remaining: remaining,
+          total: total,
+          used: used
+        });
+      }
+    );
+  });
+}
+
+// Использование бесплатного запроса
+export async function useFreeRequest(userId) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      `UPDATE users 
+       SET free_requests_used = COALESCE(free_requests_used, 0) + 1 
+       WHERE id = ? AND COALESCE(free_requests_used, 0) < COALESCE(free_requests_limit, 7)`,
+      [userId],
+      function(err) {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve(this.changes > 0);
+      }
+    );
+  });
+}
+
+// Проверка, может ли пользователь делать запросы (подписка или бесплатные)
+export async function canUserMakeRequest(userId) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      // Проверяем активную подписку
+      const subscription = await getActiveSubscription(userId);
+      
+      if (subscription) {
+        const remaining = subscription.requests_limit - subscription.requests_used;
+        if (remaining > 0) {
+          resolve({
+            canMake: true,
+            type: 'subscription',
+            remaining: remaining,
+            total: subscription.requests_limit,
+            used: subscription.requests_used
+          });
+          return;
+        }
+      }
+      
+      // Проверяем бесплатные запросы
+      const freeRequests = await getUserFreeRequests(userId);
+      if (freeRequests.remaining > 0) {
+        resolve({
+          canMake: true,
+          type: 'free',
+          remaining: freeRequests.remaining,
+          total: freeRequests.total,
+          used: freeRequests.used
+        });
+        return;
+      }
+      
+      resolve({
+        canMake: false,
+        reason: 'no_requests_left',
+        type: 'none'
+      });
+      
+    } catch (error) {
+      reject(error);
+    }
   });
 }
 
