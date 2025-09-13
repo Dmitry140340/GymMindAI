@@ -298,7 +298,7 @@ export const workoutTypesKeyboard = {
 export const detailedWorkoutKeyboard = {
   reply_markup: {
     keyboard: [
-      [{ text: '📝 Добавить упражнение' }],
+      [{ text: '➕ Добавить упражнение' }],
       [{ text: '✅ Завершить тренировку' }],
       [{ text: '❌ Отмена' }]
     ],
