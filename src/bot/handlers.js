@@ -47,6 +47,7 @@ import {
 import { runWorkflow, getConversationId, clearConversation, continueInteractiveWorkflow } from '../services/coze.js';
 import { runCozeChat } from '../services/coze_v3.js';
 import { createSubscriptionPayment } from '../services/payment.js';
+import { analyzeUserProgress, formatProgressReport } from '../services/progress-analyzer.js';
 import { 
   generateWeightChart, 
   generateWorkoutChart, 
@@ -857,6 +858,11 @@ async function handleTextMessage(bot, msg) {
 
     if (text === '🏆 Достижения') {
       await handleAchievements(bot, chatId, dbUser.id);
+      return;
+    }
+
+    if (text === '📈 Прогресс' || text.includes('Прогресс')) {
+      await handleProgressReport(bot, chatId, user.id);
       return;
     }
 
@@ -3980,6 +3986,77 @@ async function showPaymentHistory(bot, chatId, userId) {
       chatId,
       '❌ Ошибка при загрузке истории платежей. Попробуйте позже.',
       subscriptionKeyboard
+    );
+  }
+}
+
+// Функция для обработки отчета о прогрессе
+async function handleProgressReport(bot, chatId, telegramUserId) {
+  try {
+    console.log(`📈 Генерация отчета о прогрессе для пользователя ${telegramUserId}`);
+    
+    // Отправляем сообщение о загрузке
+    const loadingMessage = await bot.sendMessage(chatId, '📊 Анализирую ваш прогресс...');
+    
+    // Анализируем прогресс пользователя
+    const progressResult = await analyzeUserProgress(telegramUserId);
+    
+    if (!progressResult.success) {
+      await bot.editMessageText(
+        '❌ Ошибка при анализе прогресса. Попробуйте позже.',
+        {
+          chat_id: chatId,
+          message_id: loadingMessage.message_id
+        }
+      );
+      return;
+    }
+    
+    // Форматируем отчет
+    const reportText = formatProgressReport(progressResult.data);
+    
+    // Удаляем сообщение загрузки
+    try {
+      await bot.deleteMessage(chatId, loadingMessage.message_id);
+    } catch (deleteError) {
+      // Игнорируем ошибки удаления
+    }
+    
+    // Отправляем отчет с кнопками навигации
+    await bot.sendMessage(
+      chatId,
+      reportText,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          keyboard: [
+            [{ text: '📊 Аналитика' }, { text: '🎯 Мои данные' }],
+            [{ text: '🏋️‍♂️ Добавить тренировку' }, { text: '⚖️ Записать вес' }],
+            [{ text: '⬅️ Назад в меню' }]
+          ],
+          resize_keyboard: true,
+          one_time_keyboard: false
+        }
+      }
+    );
+    
+    console.log(`✅ Отчет о прогрессе успешно отправлен пользователю ${telegramUserId}`);
+    
+  } catch (error) {
+    console.error('❌ Ошибка при генерации отчета о прогрессе:', error);
+    
+    await bot.sendMessage(
+      chatId,
+      '❌ Произошла ошибка при анализе прогресса. Попробуйте позже.',
+      {
+        reply_markup: {
+          keyboard: [
+            [{ text: '⬅️ Назад в меню' }]
+          ],
+          resize_keyboard: true,
+          one_time_keyboard: false
+        }
+      }
     );
   }
 }
