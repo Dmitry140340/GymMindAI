@@ -89,6 +89,34 @@ export const subscriptionKeyboard = {
     keyboard: [
       [{ text: '💳 Оплатить подписку' }],
       [{ text: '📋 Статус подписки' }],
+      [{ text: '📊 История платежей' }],
+      [{ text: '⬅️ Назад в меню' }]
+    ],
+    resize_keyboard: true,
+    one_time_keyboard: false
+  }
+};
+
+// Клавиатура выбора планов подписки
+export const subscriptionPlansKeyboard = {
+  reply_markup: {
+    keyboard: [
+      [{ text: '💎 Базовый план - 150₽' }],
+      [{ text: '⭐ Стандартный план - 300₽' }],
+      [{ text: '🚀 Премиум план - 450₽' }],
+      [{ text: '⬅️ Назад к подписке' }]
+    ],
+    resize_keyboard: true,
+    one_time_keyboard: false
+  }
+};
+
+// Клавиатура для подтверждения оплаты
+export const paymentConfirmKeyboard = {
+  reply_markup: {
+    keyboard: [
+      [{ text: '💳 Оплатить сейчас' }],
+      [{ text: '⬅️ Назад к планам' }],
       [{ text: '⬅️ Назад в меню' }]
     ],
     resize_keyboard: true,
