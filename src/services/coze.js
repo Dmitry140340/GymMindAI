@@ -400,37 +400,37 @@ export async function checkCozeConnection() {
   }
 }
 
-// Функция для продолжения интерактивного workflow через Chat API
+// Функция для продолжения интерактивного workflow через Workflow Stream Resume API
 export async function continueInteractiveWorkflow(eventId, userResponse, workflowType, userId) {
   try {
-  console.log('🔄 Продолжение интерактивного workflow через Chat API:', { eventId, userResponse, workflowType, userId });
+    console.log('🔄 Продолжение интерактивного workflow через Workflow Stream Resume API:', { eventId, userResponse, workflowType, userId });
 
     if (!eventId) {
       throw new Error('Event ID не предоставлен для продолжения workflow');
     }
 
-    // Определяем bot_id на основе типа workflow
-    let botId;
+    // Определяем workflow_id на основе типа
+    let workflowId;
     switch (workflowType) {
       case 'nutrition_plan':
-        botId = '7428947126656434182'; // nutrition_plan bot
+        workflowId = process.env.COZE_NUTRITION_PLAN_WORKFLOW_ID;
         break;
       case 'training_program':
-        botId = '7428947126656434182'; // training_program bot  
+        workflowId = process.env.COZE_TRAINING_PROGRAM_WORKFLOW_ID;
         break;
       default:
         throw new Error(`Неизвестный тип workflow: ${workflowType}`);
     }
 
-    // Используем Chat API для продолжения диалога
-  const response = await axios.post(
-      `${COZE_API_BASE_URL}/v1/chat`,
+    // Используем правильный Workflow Stream Resume API
+    const response = await axios.post(
+      `${COZE_API_BASE_URL}/v1/workflow/stream_resume`,
       {
-        bot_id: botId,
-    // Для Chat API используем реальный user_id (например, Telegram user id), а не event_id из workflow
-    user_id: userId ? String(userId) : 'anonymous',
-        query: userResponse,
-        stream: true
+        event_id: eventId,
+        resume_data: userResponse,     // Правильный параметр для ответа
+        interrupt_type: 2,             // Тип 2 для обычного ответа пользователя
+        workflow_id: workflowId,       // ID workflow для валидации
+        bot_id: process.env.COZE_BOT_ID // ID бота
       },
       {
         headers: {
@@ -442,87 +442,111 @@ export async function continueInteractiveWorkflow(eventId, userResponse, workflo
       }
     );
 
-    console.log('📥 Ответ Chat API для продолжения - статус:', response.status);
+    console.log('📥 Ответ Workflow Stream Resume API - статус:', response.status);
 
-    // Обрабатываем streaming ответ от Chat API
+    // Обрабатываем streaming ответ от Workflow Resume API
     return new Promise((resolve, reject) => {
       let resultMessage = '';
       let isDone = false;
-      let allChunks = '';
-      
+      let newEventId = null;
+
       response.data.on('data', (chunk) => {
         const chunkStr = chunk.toString();
-        allChunks += chunkStr;
-        console.log('🔍 Chat API chunk:', chunkStr);
-        
-        // Парсим Server-Sent Events формат для Chat API
+        console.log('🔍 Получен resume chunk:', chunkStr);
+
+        // Парсим Server-Sent Events формат
         const lines = chunkStr.split('\n');
         let currentEvent = { id: null, event: null, data: null };
-        
+
         for (const line of lines) {
           if (line.trim() === '') {
             // Пустая строка означает конец события SSE - обрабатываем накопленное событие
             if (currentEvent.event && currentEvent.data) {
-              console.log('🔍 Chat API SSE событие:', currentEvent);
-              
+              console.log('🔍 Полное SSE событие (resume):', currentEvent);
+
               try {
                 const eventData = JSON.parse(currentEvent.data);
-                
-                if (currentEvent.event === 'conversation.message.delta') {
-                  // Накапливаем содержимое ответа
-                  if (eventData.delta && eventData.delta.content) {
-                    resultMessage += eventData.delta.content;
-                  }
-                } else if (currentEvent.event === 'conversation.message.completed') {
-                  // Сообщение завершено
+                console.log('📨 Parsed SSE event (resume):', currentEvent.event, eventData);
+
+                if (currentEvent.event === 'Message') {
                   if (eventData.content) {
-                    resultMessage = eventData.content;
+                    console.log('💬 Получено сообщение (resume):', eventData.content.substring(0, 100) + '...');
+                    
+                    // Извлекаем реальный контент из JSON-обертки если нужно
+                    let content = eventData.content;
+                    if (typeof content === 'string' && content.startsWith('{"output":')) {
+                      try {
+                        const parsed = JSON.parse(content);
+                        content = parsed.output || content;
+                      } catch (e) {
+                        // Если не получается распарсить, оставляем как есть
+                      }
+                    }
+                    
+                    resultMessage += content;
                   }
-                  console.log('💬 Chat API завершенное сообщение:', resultMessage);
-                } else if (currentEvent.event === 'conversation.chat.completed') {
-                  // Диалог завершен
+                } else if (currentEvent.event === 'Interrupt') {
+                  console.log('⏸️ Workflow требует дополнительного взаимодействия');
+                  if (eventData.interrupt_data && eventData.interrupt_data.event_id) {
+                    newEventId = eventData.interrupt_data.event_id;
+                    console.log('� Сохранен новый event_id для продолжения:', newEventId);
+                  }
+                  isDone = false; // Есть еще вопросы
+                } else if (currentEvent.event === 'Done') {
+                  console.log('✅ Workflow полностью завершен');
                   isDone = true;
-                  console.log('✅ Chat API диалог завершен');
+                } else if (currentEvent.event === 'Error') {
+                  console.log('❌ Ошибка workflow (resume):', eventData);
+                  reject(new Error(eventData.error_message || 'Ошибка workflow resume'));
+                  return;
                 }
               } catch (parseError) {
-                console.log('❌ Ошибка парсинга Chat API события:', parseError);
+                console.log('⚠️ Не удалось распарсить SSE data (resume):', currentEvent.data);
+                console.log('⚠️ Ошибка парсинга:', parseError.message);
               }
-              
-              // Сбрасываем текущее событие
+
+              // Сбрасываем для следующего события
               currentEvent = { id: null, event: null, data: null };
+              continue;
             }
-          } else if (line.startsWith('id:')) {
-            currentEvent.id = line.substring(3).trim();
+          }
+
+          // Парсим SSE поля
+          if (line.startsWith('id:')) {
+            currentEvent.id = line.slice(3).trim();
           } else if (line.startsWith('event:')) {
-            currentEvent.event = line.substring(6).trim();
+            currentEvent.event = line.slice(6).trim();
           } else if (line.startsWith('data:')) {
-            currentEvent.data = line.substring(5).trim();
+            currentEvent.data = line.slice(5).trim();
           }
         }
       });
 
       response.data.on('end', () => {
-        console.log('🔚 Chat API streaming завершен');
-        console.log('📊 Итого получено данных:', allChunks.length, 'байт');
-        console.log('💬 Результат:', resultMessage.length, 'символов');
+        console.log('🔚 Resume streaming завершен');
+        console.log('💬 Результат resume:', resultMessage.length, 'символов');
         console.log('✅ isDone:', isDone);
+        console.log('🔑 newEventId:', newEventId);
 
         resolve({
           success: true,
-          message: resultMessage || 'Ответ получен, но контент пуст',
-          isDone: true, // Chat API всегда завершает диалог
-          eventId: null // Нет продолжения для Chat API
+          message: resultMessage || 'Workflow resume выполнен',
+          eventId: newEventId,
+          isComplete: isDone
         });
       });
 
       response.data.on('error', (error) => {
-        console.error('❌ Ошибка streaming Chat API:', error);
+        console.error('❌ Ошибка resume streaming:', error);
         reject(error);
       });
     });
 
   } catch (error) {
-    console.error('❌ Ошибка при продолжении интерактивного workflow:', error);
+    console.error('❌ Ошибка продолжения интерактивного workflow:', error.message);
+    if (error.response) {
+      console.error('📄 Ответ сервера (resume):', error.response.data);
+    }
     return {
       success: false,
       error: `Ошибка продолжения workflow: ${error.message}`
