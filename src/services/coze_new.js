@@ -66,37 +66,14 @@ async function runSimpleWorkflow(workflowId, parameters) {
     console.log('📄 Данные ответа:', JSON.stringify(response.data, null, 2));
 
     if (response.data && response.data.code === 0) {
-      const rawData = response.data.data;
-      console.log('🔍 Сырые данные workflow:', rawData);
-      
-      // Парсим JSON-строку, если данные пришли как строка
-      let parsedData;
-      if (typeof rawData === 'string') {
-        try {
-          parsedData = JSON.parse(rawData);
-          console.log('✅ Успешно распарсили JSON:', parsedData);
-        } catch (parseError) {
-          console.error('❌ Ошибка парсинга JSON:', parseError.message);
-          return {
-            success: false,
-            error: 'Ошибка парсинга ответа workflow'
-          };
-        }
-      } else {
-        parsedData = rawData;
-      }
-      
-      // Ищем output в разных полях
-      const output = parsedData.output || parsedData.output_final || parsedData.result;
-      
-      if (output) {
+      const data = response.data.data;
+      if (data.output) {
         return {
           success: true,
-          data: parsedData,
-          message: output
+          data: data,
+          message: data.output
         };
       } else {
-        console.log('❌ Не найден output в данных:', Object.keys(parsedData));
         return {
           success: false,
           error: 'Нет данных в ответе workflow'
@@ -303,14 +280,12 @@ export async function runCozeChat(accessToken, message, userId, instructions) {
       if (botMessage && botMessage.content) {
         return {
           success: true,
-          message: botMessage.content,
           data: botMessage.content
         };
       } else {
         console.log('⚠️ Нет ответа от бота в сообщениях');
         return {
           success: false,
-          message: 'Не получен ответ от AI',
           error: 'Не получен ответ от AI'
         };
       }
@@ -318,7 +293,6 @@ export async function runCozeChat(accessToken, message, userId, instructions) {
       console.log('❌ Ошибка в ответе Coze:', response.data);
       return {
         success: false,
-        message: response.data?.msg || 'Неизвестная ошибка API',
         error: response.data?.msg || 'Неизвестная ошибка API'
       };
     }
@@ -342,10 +316,9 @@ export async function runCozeChat(accessToken, message, userId, instructions) {
       }
     }
 
-  // В случае ошибки используем симуляцию
-  console.log('🔄 Переключаемся на симуляцию ответа');
-  const sim = await simulateAIResponse(message, userId);
-  return { success: true, message: sim.data, data: sim.data };
+    // В случае ошибки используем симуляцию
+    console.log('🔄 Переключаемся на симуляцию ответа');
+    return await simulateAIResponse(message, userId);
   }
 }
 
@@ -401,9 +374,9 @@ export async function checkCozeConnection() {
 }
 
 // Функция для продолжения интерактивного workflow через Chat API
-export async function continueInteractiveWorkflow(eventId, userResponse, workflowType, userId) {
+export async function continueInteractiveWorkflow(eventId, userResponse, workflowType) {
   try {
-  console.log('🔄 Продолжение интерактивного workflow через Chat API:', { eventId, userResponse, workflowType, userId });
+    console.log('🔄 Продолжение интерактивного workflow через Chat API:', { eventId, userResponse, workflowType });
 
     if (!eventId) {
       throw new Error('Event ID не предоставлен для продолжения workflow');
@@ -423,12 +396,11 @@ export async function continueInteractiveWorkflow(eventId, userResponse, workflo
     }
 
     // Используем Chat API для продолжения диалога
-  const response = await axios.post(
+    const response = await axios.post(
       `${COZE_API_BASE_URL}/v1/chat`,
       {
         bot_id: botId,
-    // Для Chat API используем реальный user_id (например, Telegram user id), а не event_id из workflow
-    user_id: userId ? String(userId) : 'anonymous',
+        user_id: eventId.split('/')[0], // Извлекаем user_id из event_id
         query: userResponse,
         stream: true
       },

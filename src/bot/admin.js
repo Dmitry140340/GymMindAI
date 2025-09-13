@@ -1,5 +1,6 @@
 import { getStats, checkExpiredSubscriptions, activateSubscription, getUserByTelegramId } from '../services/database.js';
-import { checkCozeConnection, sendMessageToCoze } from '../services/coze.js';
+import { checkCozeConnection, runCozeChat } from '../services/coze.js';
+import fs from 'fs';
 
 // Команды администратора
 export function setupAdminHandlers(bot) {
@@ -181,7 +182,7 @@ export function setupAdminHandlers(bot) {
         return;
       }
       
-      const response = await sendMessageToCoze(testMessage, userId);
+      const response = await runCozeChat('test_token', testMessage, userId, 'Тестовое сообщение');
       
       if (response.success) {
         await bot.sendMessage(chatId, 
@@ -200,6 +201,95 @@ export function setupAdminHandlers(bot) {
       console.error('Ошибка тестирования Coze:', error);
       await bot.sendMessage(chatId, `❌ Ошибка при тестировании Coze: ${error.message}`);
     }
+  });
+
+  // Переключение платежного режима (только для администратора)
+  bot.onText(/\/admin_payment_mode (.+)/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const mode = match[1];
+    
+    // Проверяем, является ли пользователь администратором
+    const adminIds = process.env.ADMIN_IDS ? process.env.ADMIN_IDS.split(',').map(id => parseInt(id)) : [];
+    
+    if (!adminIds.includes(userId)) {
+      await bot.sendMessage(chatId, '❌ У вас нет прав администратора.');
+      return;
+    }
+    
+    if (mode !== 'test' && mode !== 'production') {
+      await bot.sendMessage(chatId, 
+        '❌ Неверный режим. Используйте:\n' +
+        '• `/admin_payment_mode test` - тестовый режим\n' +
+        '• `/admin_payment_mode production` - продакшн режим'
+      );
+      return;
+    }
+    
+    try {
+      // Обновляем переменную окружения
+      process.env.PAYMENT_MODE = mode;
+      
+      // Переинициализируем платежную систему
+      const envContent = fs.readFileSync('.env', 'utf8');
+      const updatedContent = envContent.replace(
+        /PAYMENT_MODE=.*/,
+        `PAYMENT_MODE=${mode}`
+      );
+      fs.writeFileSync('.env', updatedContent);
+      
+      // Обновляем текущие переменные
+      if (mode === 'production') {
+        process.env.YOOKASSA_SHOP_ID = process.env.YOOKASSA_PROD_SHOP_ID;
+        process.env.YOOKASSA_SECRET_KEY = process.env.YOOKASSA_PROD_SECRET_KEY;
+      } else {
+        process.env.YOOKASSA_SHOP_ID = process.env.YOOKASSA_TEST_SHOP_ID;
+        process.env.YOOKASSA_SECRET_KEY = process.env.YOOKASSA_TEST_SECRET_KEY;
+      }
+      
+      const modeEmoji = mode === 'production' ? '💳' : '🧪';
+      const modeText = mode === 'production' ? 'ПРОДАКШН' : 'ТЕСТОВЫЙ';
+      
+      await bot.sendMessage(chatId, 
+        `${modeEmoji} Платежный режим изменен на: **${modeText}**\n\n` +
+        `🏪 Shop ID: ${process.env.YOOKASSA_SHOP_ID}\n` +
+        `${mode === 'production' ? '⚠️ ВНИМАНИЕ: Включены реальные платежи!' : '✅ Тестовый режим - реальные деньги не списываются'}`
+      );
+      
+      console.log(`💳 Админ ${userId} изменил платежный режим на: ${mode}`);
+      
+    } catch (error) {
+      console.error('Ошибка изменения платежного режима:', error);
+      await bot.sendMessage(chatId, `❌ Ошибка изменения режима: ${error.message}`);
+    }
+  });
+
+  // Проверка текущего платежного режима
+  bot.onText(/\/admin_payment_status/, async (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    
+    // Проверяем, является ли пользователь администратором
+    const adminIds = process.env.ADMIN_IDS ? process.env.ADMIN_IDS.split(',').map(id => parseInt(id)) : [];
+    
+    if (!adminIds.includes(userId)) {
+      await bot.sendMessage(chatId, '❌ У вас нет прав администратора.');
+      return;
+    }
+    
+    const mode = process.env.PAYMENT_MODE || 'test';
+    const modeEmoji = mode === 'production' ? '💳' : '🧪';
+    const modeText = mode === 'production' ? 'ПРОДАКШН' : 'ТЕСТОВЫЙ';
+    
+    await bot.sendMessage(chatId, 
+      `${modeEmoji} **Текущий платежный режим: ${modeText}**\n\n` +
+      `🏪 Shop ID: ${process.env.YOOKASSA_SHOP_ID}\n` +
+      `🔑 Secret Key: ${process.env.YOOKASSA_SECRET_KEY ? '***скрыт***' : 'НЕ УСТАНОВЛЕН'}\n\n` +
+      `${mode === 'production' ? '⚠️ Реальные платежи включены!' : '✅ Тестовый режим активен'}\n\n` +
+      `🔄 Для изменения используйте:\n` +
+      `• \`/admin_payment_mode test\`\n` +
+      `• \`/admin_payment_mode production\``
+    );
   });
 
   console.log('✅ Команды администратора настроены');

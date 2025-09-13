@@ -224,6 +224,45 @@ export async function initDatabase() {
           }
         });
 
+        // Миграция: добавляем новые поля для детальных тренировок
+        db.all(`PRAGMA table_info(workouts)`, (pragmaErr, columns) => {
+          if (!pragmaErr && columns) {
+            const hasWorkoutDetails = columns.some(col => col.name === 'workout_details');
+            const hasMoodBefore = columns.some(col => col.name === 'mood_before');
+            const hasMoodAfter = columns.some(col => col.name === 'mood_after');
+            
+            if (!hasWorkoutDetails) {
+              db.run(`ALTER TABLE workouts ADD COLUMN workout_details TEXT`, (alterErr) => {
+                if (alterErr) {
+                  console.log('Ошибка добавления колонки workout_details:', alterErr.message);
+                } else {
+                  console.log('✅ Добавлена колонка workout_details в таблицу workouts');
+                }
+              });
+            }
+            
+            if (!hasMoodBefore) {
+              db.run(`ALTER TABLE workouts ADD COLUMN mood_before INTEGER`, (alterErr) => {
+                if (alterErr) {
+                  console.log('Ошибка добавления колонки mood_before:', alterErr.message);
+                } else {
+                  console.log('✅ Добавлена колонка mood_before в таблицу workouts');
+                }
+              });
+            }
+            
+            if (!hasMoodAfter) {
+              db.run(`ALTER TABLE workouts ADD COLUMN mood_after INTEGER`, (alterErr) => {
+                if (alterErr) {
+                  console.log('Ошибка добавления колонки mood_after:', alterErr.message);
+                } else {
+                  console.log('✅ Добавлена колонка mood_after в таблицу workouts');
+                }
+              });
+            }
+          }
+        });
+
         // Таблица платежей
         db.run(`
           CREATE TABLE IF NOT EXISTS payments (
@@ -1194,6 +1233,520 @@ export async function canUserMakeRequest(userId) {
     } catch (error) {
       reject(error);
     }
+  });
+}
+
+// Функции для управления пользовательскими данными
+
+// Получить последнюю запись веса
+export async function getLastWeightRecord(userId) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      `SELECT * FROM fitness_metrics 
+       WHERE user_id = ? AND metric_type = 'weight' 
+       ORDER BY recorded_at DESC LIMIT 1`,
+      [userId],
+      (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      }
+    );
+  });
+}
+
+// Обновить последнюю запись веса
+export async function updateLastWeightRecord(userId, newValue, newUnit = 'kg') {
+  return new Promise((resolve, reject) => {
+    db.run(
+      `UPDATE fitness_metrics 
+       SET value = ?, unit = ?, recorded_at = CURRENT_TIMESTAMP
+       WHERE user_id = ? AND metric_type = 'weight' 
+       AND id = (SELECT id FROM fitness_metrics 
+                 WHERE user_id = ? AND metric_type = 'weight' 
+                 ORDER BY recorded_at DESC LIMIT 1)`,
+      [newValue, newUnit, userId, userId],
+      function(err) {
+        if (err) reject(err);
+        else resolve(this.changes > 0);
+      }
+    );
+  });
+}
+
+// Удалить последнюю запись веса
+export async function deleteLastWeightRecord(userId) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      `DELETE FROM fitness_metrics 
+       WHERE user_id = ? AND metric_type = 'weight' 
+       AND id = (SELECT id FROM fitness_metrics 
+                 WHERE user_id = ? AND metric_type = 'weight' 
+                 ORDER BY recorded_at DESC LIMIT 1)`,
+      [userId, userId],
+      function(err) {
+        if (err) reject(err);
+        else resolve(this.changes > 0);
+      }
+    );
+  });
+}
+
+// Получить последнюю тренировку
+export async function getLastWorkoutRecord(userId) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      `SELECT * FROM workouts 
+       WHERE user_id = ? 
+       ORDER BY workout_date DESC LIMIT 1`,
+      [userId],
+      (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      }
+    );
+  });
+}
+
+// Обновить последнюю тренировку
+export async function updateLastWorkoutRecord(userId, workoutType, duration, caloriesBurned, intensity, exercisesCount, notes = null) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      `UPDATE workouts 
+       SET workout_type = ?, duration_minutes = ?, calories_burned = ?, 
+           intensity = ?, exercises_count = ?, notes = ?, workout_date = CURRENT_TIMESTAMP
+       WHERE user_id = ? 
+       AND id = (SELECT id FROM workouts 
+                 WHERE user_id = ? 
+                 ORDER BY workout_date DESC LIMIT 1)`,
+      [workoutType, duration, caloriesBurned, intensity, exercisesCount, notes, userId, userId],
+      function(err) {
+        if (err) reject(err);
+        else resolve(this.changes > 0);
+      }
+    );
+  });
+}
+
+// Удалить последнюю тренировку
+export async function deleteLastWorkoutRecord(userId) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      `DELETE FROM workouts 
+       WHERE user_id = ? 
+       AND id = (SELECT id FROM workouts 
+                 WHERE user_id = ? 
+                 ORDER BY workout_date DESC LIMIT 1)`,
+      [userId, userId],
+      function(err) {
+        if (err) reject(err);
+        else resolve(this.changes > 0);
+      }
+    );
+  });
+}
+
+// Удалить цель
+export async function deleteUserGoal(userId, goalType) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      `DELETE FROM user_goals 
+       WHERE user_id = ? AND goal_type = ?`,
+      [userId, goalType],
+      function(err) {
+        if (err) reject(err);
+        else resolve(this.changes > 0);
+      }
+    );
+  });
+}
+
+// Обновить цель
+export async function updateUserGoal(userId, goalType, targetValue, targetDate = null) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      `UPDATE user_goals 
+       SET target_value = ?, target_date = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE user_id = ? AND goal_type = ?`,
+      [targetValue, targetDate, userId, goalType],
+      function(err) {
+        if (err) reject(err);
+        else resolve(this.changes > 0);
+      }
+    );
+  });
+}
+
+// Очистить все данные пользователя (кроме подписок)
+export async function clearAllUserData(userId) {
+  return new Promise((resolve, reject) => {
+    db.serialize(() => {
+      db.run(`DELETE FROM fitness_metrics WHERE user_id = ?`, [userId]);
+      db.run(`DELETE FROM workouts WHERE user_id = ?`, [userId]);
+      db.run(`DELETE FROM user_goals WHERE user_id = ?`, [userId]);
+      db.run(`DELETE FROM achievements WHERE user_id = ?`, [userId], function(err) {
+        if (err) reject(err);
+        else resolve(true);
+      });
+    });
+  });
+}
+
+// Получить статистику пользователя
+export async function getUserDataSummary(userId) {
+  return new Promise((resolve, reject) => {
+    const summary = {};
+    
+    db.serialize(() => {
+      // Количество записей веса
+      db.get(
+        `SELECT COUNT(*) as count FROM fitness_metrics WHERE user_id = ? AND metric_type = 'weight'`,
+        [userId],
+        (err, row) => {
+          if (err) {
+            reject(err);
+            return;
+          }
+          summary.weightRecords = row.count;
+        }
+      );
+      
+      // Количество тренировок
+      db.get(
+        `SELECT COUNT(*) as count FROM workouts WHERE user_id = ?`,
+        [userId],
+        (err, row) => {
+          if (err) {
+            reject(err);
+            return;
+          }
+          summary.workoutRecords = row.count;
+        }
+      );
+      
+      // Количество целей
+      db.get(
+        `SELECT COUNT(*) as count FROM user_goals WHERE user_id = ?`,
+        [userId],
+        (err, row) => {
+          if (err) {
+            reject(err);
+            return;
+          }
+          summary.goalRecords = row.count;
+          resolve(summary);
+        }
+      );
+    });
+  });
+}
+
+// Функции для детальных тренировок
+
+// Сохранить детальную тренировку
+export async function saveDetailedWorkout(userId, workoutType, duration, workoutDetails, moodBefore = null, moodAfter = null, notes = null) {
+  return new Promise((resolve, reject) => {
+    const detailsJson = JSON.stringify(workoutDetails);
+    
+    db.run(
+      `INSERT INTO workouts (user_id, workout_type, duration_minutes, calories_burned, intensity_level, exercises_count, notes, workout_details, mood_before, mood_after, completed_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      [
+        userId, 
+        workoutType, 
+        duration, 
+        workoutDetails.totalCalories || 0,
+        workoutDetails.averageIntensity || 'medium',
+        workoutDetails.exercises?.length || 0,
+        notes,
+        detailsJson,
+        moodBefore,
+        moodAfter
+      ],
+      function(err) {
+        if (err) reject(err);
+        else resolve(this.lastID);
+      }
+    );
+  });
+}
+
+// Получить детальную тренировку
+export async function getDetailedWorkout(workoutId) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      `SELECT *, workout_details as details FROM workouts WHERE id = ?`,
+      [workoutId],
+      (err, row) => {
+        if (err) {
+          reject(err);
+        } else if (row) {
+          // Парсим JSON детали
+          if (row.details) {
+            try {
+              row.parsedDetails = JSON.parse(row.details);
+            } catch (parseErr) {
+              row.parsedDetails = null;
+            }
+          }
+          resolve(row);
+        } else {
+          resolve(null);
+        }
+      }
+    );
+  });
+}
+
+// Получить детальные тренировки пользователя
+export async function getUserDetailedWorkouts(userId, limit = 10) {
+  return new Promise((resolve, reject) => {
+    db.all(
+      `SELECT *, workout_details as details FROM workouts 
+       WHERE user_id = ? AND workout_details IS NOT NULL AND workout_details != ''
+       ORDER BY completed_at DESC 
+       LIMIT ?`,
+      [userId, limit],
+      (err, rows) => {
+        if (err) {
+          reject(err);
+        } else {
+          // Парсим JSON детали для каждой тренировки
+          const workouts = rows.map(row => {
+            if (row.details) {
+              try {
+                row.workout_details = JSON.parse(row.details);
+              } catch (parseErr) {
+                row.workout_details = null;
+              }
+            }
+            return row;
+          });
+          resolve(workouts);
+        }
+      }
+    );
+  });
+}
+
+// Обновить детальную тренировку
+export async function updateDetailedWorkout(workoutId, workoutType, duration, workoutDetails, moodBefore = null, moodAfter = null, notes = null) {
+  return new Promise((resolve, reject) => {
+    const detailsJson = JSON.stringify(workoutDetails);
+    
+    db.run(
+      `UPDATE workouts 
+       SET workout_type = ?, duration_minutes = ?, calories_burned = ?, 
+           intensity_level = ?, exercises_count = ?, notes = ?, 
+           workout_details = ?, mood_before = ?, mood_after = ?
+       WHERE id = ?`,
+      [
+        workoutType,
+        duration,
+        workoutDetails.totalCalories || 0,
+        workoutDetails.averageIntensity || 'medium',
+        workoutDetails.exercises?.length || 0,
+        notes,
+        detailsJson,
+        moodBefore,
+        moodAfter,
+        workoutId
+      ],
+      function(err) {
+        if (err) reject(err);
+        else resolve(this.changes > 0);
+      }
+    );
+  });
+}
+
+// Получить статистику прогресса по упражнениям
+export async function getExerciseProgressStats(userId, exerciseName, limit = 10) {
+  return new Promise((resolve, reject) => {
+    db.all(
+      `SELECT completed_at, workout_details 
+       FROM workouts 
+       WHERE user_id = ? AND workout_details LIKE ?
+       ORDER BY completed_at DESC 
+       LIMIT ?`,
+      [userId, `%"${exerciseName}"%`, limit],
+      (err, rows) => {
+        if (err) {
+          reject(err);
+        } else {
+          const progressData = [];
+          
+          rows.forEach(row => {
+            if (row.workout_details) {
+              try {
+                const details = JSON.parse(row.workout_details);
+                if (details.exercises) {
+                  const exercise = details.exercises.find(ex => ex.name === exerciseName);
+                  if (exercise) {
+                    progressData.push({
+                      date: row.completed_at,
+                      exercise: exercise
+                    });
+                  }
+                }
+              } catch (parseErr) {
+                // Игнорируем ошибки парсинга
+              }
+            }
+          });
+          
+          resolve(progressData);
+        }
+      }
+    );
+  });
+}
+
+// === ФУНКЦИИ УДАЛЕНИЯ ЗАПИСЕЙ ===
+
+// Удалить последнюю тренировку
+export async function deleteLastWorkout(userId) {
+  return new Promise((resolve, reject) => {
+    // Сначала находим последнюю тренировку
+    db.get(
+      'SELECT id, completed_at FROM workouts WHERE user_id = ? ORDER BY completed_at DESC LIMIT 1',
+      [userId],
+      (err, row) => {
+        if (err) {
+          reject(err);
+        } else if (!row) {
+          resolve({ success: false, message: 'Тренировки не найдены' });
+        } else {
+          // Удаляем найденную тренировку
+          db.run(
+            'DELETE FROM workouts WHERE id = ?',
+            [row.id],
+            function(deleteErr) {
+              if (deleteErr) {
+                reject(deleteErr);
+              } else {
+                resolve({ 
+                  success: true, 
+                  message: 'Последняя тренировка удалена',
+                  deletedAt: row.completed_at
+                });
+              }
+            }
+          );
+        }
+      }
+    );
+  });
+}
+
+// Удалить последнюю запись веса
+export async function deleteLastWeight(userId) {
+  return new Promise((resolve, reject) => {
+    // Сначала находим последнюю запись веса
+    db.get(
+      'SELECT id, recorded_at, value FROM fitness_metrics WHERE user_id = ? AND metric_type = "weight" ORDER BY recorded_at DESC LIMIT 1',
+      [userId],
+      (err, row) => {
+        if (err) {
+          reject(err);
+        } else if (!row) {
+          resolve({ success: false, message: 'Записи веса не найдены' });
+        } else {
+          // Удаляем найденную запись веса
+          db.run(
+            'DELETE FROM fitness_metrics WHERE id = ?',
+            [row.id],
+            function(deleteErr) {
+              if (deleteErr) {
+                reject(deleteErr);
+              } else {
+                resolve({ 
+                  success: true, 
+                  message: 'Последняя запись веса удалена',
+                  deletedAt: row.recorded_at,
+                  value: row.value
+                });
+              }
+            }
+          );
+        }
+      }
+    );
+  });
+}
+
+// Удалить все тренировки пользователя
+export async function deleteAllWorkouts(userId) {
+  return new Promise((resolve, reject) => {
+    // Сначала подсчитываем количество тренировок
+    db.get(
+      'SELECT COUNT(*) as count FROM workouts WHERE user_id = ?',
+      [userId],
+      (err, row) => {
+        if (err) {
+          reject(err);
+        } else {
+          const count = row.count;
+          if (count === 0) {
+            resolve({ success: false, message: 'Тренировки не найдены' });
+          } else {
+            // Удаляем все тренировки
+            db.run(
+              'DELETE FROM workouts WHERE user_id = ?',
+              [userId],
+              function(deleteErr) {
+                if (deleteErr) {
+                  reject(deleteErr);
+                } else {
+                  resolve({ 
+                    success: true, 
+                    message: `Удалено ${count} тренировок`,
+                    count: count
+                  });
+                }
+              }
+            );
+          }
+        }
+      }
+    );
+  });
+}
+
+// Удалить все записи веса пользователя
+export async function deleteAllWeights(userId) {
+  return new Promise((resolve, reject) => {
+    // Сначала подсчитываем количество записей веса
+    db.get(
+      'SELECT COUNT(*) as count FROM fitness_metrics WHERE user_id = ? AND metric_type = "weight"',
+      [userId],
+      (err, row) => {
+        if (err) {
+          reject(err);
+        } else {
+          const count = row.count;
+          if (count === 0) {
+            resolve({ success: false, message: 'Записи веса не найдены' });
+          } else {
+            // Удаляем все записи веса
+            db.run(
+              'DELETE FROM fitness_metrics WHERE user_id = ? AND metric_type = "weight"',
+              [userId],
+              function(deleteErr) {
+                if (deleteErr) {
+                  reject(deleteErr);
+                } else {
+                  resolve({ 
+                    success: true, 
+                    message: `Удалено ${count} записей веса`,
+                    count: count
+                  });
+                }
+              }
+            );
+          }
+        }
+      }
+    );
   });
 }
 
