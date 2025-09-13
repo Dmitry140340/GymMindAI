@@ -1750,4 +1750,42 @@ export async function deleteAllWeights(userId) {
   });
 }
 
+// Удалить все цели пользователя
+export async function deleteAllGoals(userId) {
+  return new Promise((resolve, reject) => {
+    // Сначала подсчитываем количество целей
+    db.get(
+      'SELECT COUNT(*) as count FROM user_goals WHERE user_id = ?',
+      [userId],
+      (err, row) => {
+        if (err) {
+          reject(err);
+        } else {
+          const count = row.count;
+          if (count === 0) {
+            resolve({ success: false, message: 'Цели не найдены' });
+          } else {
+            // Удаляем все цели
+            db.run(
+              'DELETE FROM user_goals WHERE user_id = ?',
+              [userId],
+              function(deleteErr) {
+                if (deleteErr) {
+                  reject(deleteErr);
+                } else {
+                  resolve({ 
+                    success: true, 
+                    message: `Удалено ${count} целей`,
+                    count: count
+                  });
+                }
+              }
+            );
+          }
+        }
+      }
+    );
+  });
+}
+
 export { db };

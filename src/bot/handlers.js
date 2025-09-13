@@ -42,7 +42,8 @@ import {
   deleteLastWorkout,
   deleteLastWeight,
   deleteAllWorkouts,
-  deleteAllWeights
+  deleteAllWeights,
+  deleteAllGoals
 } from '../services/database.js';
 import { runWorkflow, getConversationId, clearConversation, continueInteractiveWorkflow } from '../services/coze.js';
 import { runCozeChat } from '../services/coze_v3.js';
@@ -1014,6 +1015,27 @@ async function handleTextMessage(bot, msg) {
     
     if (text === '🗑️ Удалить все записи веса') {
       await confirmDeleteAllWeights(bot, chatId, dbUser.id);
+      return;
+    }
+
+    // Новые кнопки удаления из deleteRecordsKeyboard
+    if (text === '🗑️ Удалить тренировки') {
+      await confirmDeleteAllWorkouts(bot, chatId, dbUser.id);
+      return;
+    }
+    
+    if (text === '🗑️ Удалить веса') {
+      await confirmDeleteAllWeights(bot, chatId, dbUser.id);
+      return;
+    }
+    
+    if (text === '🗑️ Удалить цели') {
+      await confirmDeleteAllGoals(bot, chatId, dbUser.id);
+      return;
+    }
+    
+    if (text === '🗑️ Удалить всё') {
+      await confirmDeleteAllData(bot, chatId, dbUser.id);
       return;
     }
 
@@ -2147,6 +2169,40 @@ async function handleTextMessage(bot, msg) {
         await bot.sendMessage(
           chatId,
           '❌ Удаление отменено.\n\nДля подтверждения нужно было написать точно: `УДАЛИТЬ ВСЕ ВЕСА`',
+          { parse_mode: 'Markdown', ...mainKeyboard }
+        );
+        return;
+      }
+    }
+
+    // Обработка подтверждения удаления всех целей
+    if (userStates.get(user.id) === 'waiting_confirm_delete_all_goals') {
+      if (text === 'УДАЛИТЬ ВСЕ ЦЕЛИ') {
+        userStates.delete(user.id);
+        await processDeleteAllGoals(bot, chatId, dbUser.id);
+        return;
+      } else {
+        userStates.delete(user.id);
+        await bot.sendMessage(
+          chatId,
+          '❌ Удаление отменено.\n\nДля подтверждения нужно было написать точно: `УДАЛИТЬ ВСЕ ЦЕЛИ`',
+          { parse_mode: 'Markdown', ...mainKeyboard }
+        );
+        return;
+      }
+    }
+
+    // Обработка подтверждения удаления всех данных
+    if (userStates.get(user.id) === 'waiting_confirm_delete_all_data') {
+      if (text === 'УДАЛИТЬ ВСЕ ДАННЫЕ') {
+        userStates.delete(user.id);
+        await processDeleteAllData(bot, chatId, dbUser.id);
+        return;
+      } else {
+        userStates.delete(user.id);
+        await bot.sendMessage(
+          chatId,
+          '❌ Удаление отменено.\n\nДля подтверждения нужно было написать точно: `УДАЛИТЬ ВСЕ ДАННЫЕ`',
           { parse_mode: 'Markdown', ...mainKeyboard }
         );
         return;
@@ -4058,6 +4114,102 @@ async function handleDetailedProgressReport(bot, chatId, telegramUserId) {
         }
       }
     );
+  }
+}
+
+// Функции для удаления целей и всех данных
+async function confirmDeleteAllGoals(bot, chatId, userId) {
+  await bot.sendMessage(
+    chatId,
+    '⚠️ **ВНИМАНИЕ!**\n\n' +
+    '🗑️ Вы действительно хотите удалить **ВСЕ** свои цели?\n\n' +
+    '❌ Это действие **НЕОБРАТИМО**!\n\n' +
+    'Для подтверждения напишите: `УДАЛИТЬ ВСЕ ЦЕЛИ`',
+    { parse_mode: 'Markdown', ...mainKeyboard }
+  );
+  
+  userStates.set(chatId, 'waiting_confirm_delete_all_goals');
+}
+
+async function confirmDeleteAllData(bot, chatId, userId) {
+  await bot.sendMessage(
+    chatId,
+    '⚠️ **КРИТИЧЕСКОЕ ПРЕДУПРЕЖДЕНИЕ!**\n\n' +
+    '🗑️ Вы действительно хотите удалить **АБСОЛЮТНО ВСЕ** данные?\n\n' +
+    '💥 Это включает:\n' +
+    '• Все тренировки\n' +
+    '• Все записи веса\n' +
+    '• Все цели\n' +
+    '• Всю статистику\n\n' +
+    '❌ Это действие **ПОЛНОСТЬЮ НЕОБРАТИМО**!\n\n' +
+    'Для подтверждения напишите: `УДАЛИТЬ ВСЕ ДАННЫЕ`',
+    { parse_mode: 'Markdown', ...mainKeyboard }
+  );
+  
+  userStates.set(chatId, 'waiting_confirm_delete_all_data');
+}
+
+async function processDeleteAllGoals(bot, chatId, userId) {
+  try {
+    const result = await deleteAllGoals(userId);
+    
+    if (result.success) {
+      await bot.sendMessage(
+        chatId,
+        `✅ **Все цели удалены**\n\n` +
+        `🗑️ Удалено: ${result.count} целей`,
+        { parse_mode: 'Markdown', ...mainKeyboard }
+      );
+    } else {
+      await bot.sendMessage(
+        chatId,
+        `❌ **Ошибка удаления**\n\n` +
+        `${result.message}`,
+        { parse_mode: 'Markdown', ...mainKeyboard }
+      );
+    }
+  } catch (error) {
+    console.error('Ошибка при удалении всех целей:', error);
+    await bot.sendMessage(chatId, 'Ошибка при удалении целей.', { ...mainKeyboard });
+  }
+}
+
+async function processDeleteAllData(bot, chatId, userId) {
+  try {
+    // Удаляем все данные пользователя
+    const workoutsResult = await deleteAllWorkouts(userId);
+    const weightsResult = await deleteAllWeights(userId);
+    const goalsResult = await deleteAllGoals(userId);
+    
+    let totalDeleted = 0;
+    let details = [];
+    
+    if (workoutsResult.success) {
+      totalDeleted += workoutsResult.count;
+      details.push(`• Тренировки: ${workoutsResult.count}`);
+    }
+    
+    if (weightsResult.success) {
+      totalDeleted += weightsResult.count;
+      details.push(`• Записи веса: ${weightsResult.count}`);
+    }
+    
+    if (goalsResult.success) {
+      totalDeleted += goalsResult.count;
+      details.push(`• Цели: ${goalsResult.count}`);
+    }
+    
+    await bot.sendMessage(
+      chatId,
+      `💥 **ВСЕ ДАННЫЕ УДАЛЕНЫ**\n\n` +
+      `🗑️ Всего удалено записей: ${totalDeleted}\n\n` +
+      `Детализация:\n${details.join('\n')}\n\n` +
+      `✨ Вы можете начать заново!`,
+      { parse_mode: 'Markdown', ...mainKeyboard }
+    );
+  } catch (error) {
+    console.error('Ошибка при удалении всех данных:', error);
+    await bot.sendMessage(chatId, 'Ошибка при удалении данных.', { ...mainKeyboard });
   }
 }
 
