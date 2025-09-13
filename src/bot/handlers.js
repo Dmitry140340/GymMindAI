@@ -862,7 +862,7 @@ async function handleTextMessage(bot, msg) {
     }
 
     if (text === '📈 Прогресс' || text.includes('Прогресс')) {
-      await handleProgressReport(bot, chatId, user.id);
+      await handleDetailedProgressReport(bot, chatId, user.id);
       return;
     }
 
@@ -3990,8 +3990,8 @@ async function showPaymentHistory(bot, chatId, userId) {
   }
 }
 
-// Функция для обработки отчета о прогрессе
-async function handleProgressReport(bot, chatId, telegramUserId) {
+// Функция для обработки детального отчета о прогрессе
+async function handleDetailedProgressReport(bot, chatId, telegramUserId) {
   try {
     console.log(`📈 Генерация отчета о прогрессе для пользователя ${telegramUserId}`);
     
