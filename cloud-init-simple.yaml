@@ -1,0 +1,47 @@
+#cloud-config
+
+# ===== БЫСТРАЯ НАСТРОЙКА ДЛЯ ТЕСТИРОВАНИЯ FITNESSBOTAI =====
+
+users: []
+
+package_update: true
+packages:
+  - nodejs
+  - npm
+  - git
+  - nginx
+
+runcmd:
+  # Установка Node.js LTS
+  - curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -
+  - apt-get install -y nodejs
+  - npm install -g pm2
+  
+  # Создание пользователя
+  - useradd -m -s /bin/bash botuser
+  - usermod -aG sudo botuser
+  
+  # Клонирование и настройка
+  - cd /home/botuser
+  - sudo -u botuser git clone https://github.com/Dmitry140340/GymMindAI.git
+  - chown -R botuser:botuser /home/botuser/GymMindAI
+  - cd /home/botuser/GymMindAI
+  - sudo -u botuser npm install
+  - sudo -u botuser mkdir -p data
+  
+  # Базовая настройка firewall
+  - ufw --force enable
+  - ufw allow ssh
+  - ufw allow 3004/tcp
+
+write_files:
+  - path: /home/botuser/GymMindAI/.env.example
+    owner: botuser:botuser
+    permissions: '0644'
+    content: |
+      TELEGRAM_BOT_TOKEN=YOUR_TOKEN
+      COZE_API_KEY=YOUR_KEY
+      COZE_BOT_ID=YOUR_BOT_ID
+      YOOKASSA_PROD_SHOP_ID=1158662
+      YOOKASSA_PROD_SECRET_KEY=YOUR_SECRET
+      PORT=3004

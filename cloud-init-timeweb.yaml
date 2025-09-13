@@ -1,0 +1,325 @@
+#cloud-config
+
+# ===== АВТОМАТИЧЕСКАЯ НАСТРОЙКА СЕРВЕРА ДЛЯ FITNESSBOTAI =====
+# Этот скрипт автоматически настроит Ubuntu 24.04 сервер для деплоя Telegram бота
+
+# Отключаем создание пользователя ubuntu по умолчанию
+users: []
+
+# Обновляем систему и устанавливаем необходимые пакеты
+package_update: true
+package_upgrade: true
+
+packages:
+  # Node.js и npm
+  - nodejs
+  - npm
+  # Git для клонирования репозитория
+  - git
+  # Nginx для reverse proxy и SSL
+  - nginx
+  # Certbot для SSL сертификатов
+  - certbot
+  - python3-certbot-nginx
+  # Утилиты для мониторинга
+  - htop
+  - curl
+  - wget
+  - unzip
+  # Firewall
+  - ufw
+  # PM2 process manager (будет установлен через npm)
+  - build-essential
+
+# Выполняем команды после установки пакетов
+runcmd:
+  # ===== НАСТРОЙКА NODE.JS =====
+  # Устанавливаем последнюю LTS версию Node.js
+  - curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -
+  - apt-get install -y nodejs
+  
+  # Устанавливаем PM2 глобально
+  - npm install -g pm2
+  
+  # ===== СОЗДАНИЕ ПОЛЬЗОВАТЕЛЯ ДЛЯ БОТА =====
+  - useradd -m -s /bin/bash botuser
+  - usermod -aG sudo botuser
+  - mkdir -p /home/botuser/.ssh
+  - chown botuser:botuser /home/botuser/.ssh
+  - chmod 700 /home/botuser/.ssh
+  
+  # ===== КЛОНИРОВАНИЕ РЕПОЗИТОРИЯ =====
+  - cd /home/botuser
+  - sudo -u botuser git clone https://github.com/Dmitry140340/GymMindAI.git
+  - chown -R botuser:botuser /home/botuser/GymMindAI
+  
+  # ===== НАСТРОЙКА ПРОЕКТА =====
+  - cd /home/botuser/GymMindAI
+  - sudo -u botuser npm install
+  - sudo -u botuser mkdir -p data
+  - sudo -u botuser chmod 755 data
+  
+  # ===== НАСТРОЙКА NGINX =====
+  - systemctl enable nginx
+  - systemctl start nginx
+  
+  # Удаляем дефолтную конфигурацию
+  - rm -f /etc/nginx/sites-enabled/default
+  
+  # ===== НАСТРОЙКА FIREWALL =====
+  - ufw --force enable
+  - ufw allow ssh
+  - ufw allow http
+  - ufw allow https
+  - ufw allow 3004/tcp
+  
+  # ===== НАСТРОЙКА АВТОЗАПУСКА =====
+  - sudo -u botuser pm2 startup
+  - env PATH=$PATH:/usr/bin /usr/lib/node_modules/pm2/bin/pm2 startup systemd -u botuser --hp /home/botuser
+  
+  # ===== СОЗДАНИЕ ДИРЕКТОРИЙ ДЛЯ ЛОГОВ =====
+  - mkdir -p /var/log/fitnessbotai
+  - chown botuser:botuser /var/log/fitnessbotai
+  
+  # ===== ОПТИМИЗАЦИЯ СИСТЕМЫ =====
+  # Увеличиваем лимиты для Node.js
+  - echo "botuser soft nofile 65536" >> /etc/security/limits.conf
+  - echo "botuser hard nofile 65536" >> /etc/security/limits.conf
+  
+  # ===== АВТОМАТИЧЕСКОЕ ОБНОВЛЕНИЕ БЕЗОПАСНОСТИ =====
+  - apt install -y unattended-upgrades
+  - dpkg-reconfigure -plow unattended-upgrades
+
+# Создаем необходимые файлы конфигурации
+write_files:
+  # Конфигурация Nginx для бота
+  - path: /etc/nginx/sites-available/fitnessbotai
+    owner: root:root
+    permissions: '0644'
+    content: |
+      # Конфигурация Nginx для FitnessBotAI
+      
+      # Rate limiting
+      limit_req_zone $binary_remote_addr zone=webhook:10m rate=10r/s;
+      limit_req_zone $binary_remote_addr zone=api:10m rate=100r/s;
+      
+      server {
+          listen 80;
+          server_name _;
+          
+          # Webhook endpoint с rate limiting
+          location /webhook {
+              limit_req zone=webhook burst=5 nodelay;
+              
+              proxy_pass http://localhost:3004;
+              proxy_http_version 1.1;
+              proxy_set_header Upgrade $http_upgrade;
+              proxy_set_header Connection 'upgrade';
+              proxy_set_header Host $host;
+              proxy_set_header X-Real-IP $remote_addr;
+              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto $scheme;
+              proxy_cache_bypass $http_upgrade;
+              
+              # Увеличиваем timeout для webhook
+              proxy_connect_timeout 60s;
+              proxy_send_timeout 60s;
+              proxy_read_timeout 60s;
+          }
+          
+          # Payment webhook
+          location /webhook/payment {
+              limit_req zone=webhook burst=3 nodelay;
+              
+              proxy_pass http://localhost:3004;
+              proxy_http_version 1.1;
+              proxy_set_header Host $host;
+              proxy_set_header X-Real-IP $remote_addr;
+              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto $scheme;
+          }
+          
+          # Мониторинг (опционально)
+          location /health {
+              limit_req zone=api burst=10 nodelay;
+              proxy_pass http://localhost:3004;
+          }
+          
+          # Блокируем доступ к служебным файлам
+          location ~ /\. {
+              deny all;
+              access_log off;
+              log_not_found off;
+          }
+      }
+
+  # Ecosystem файл для PM2
+  - path: /home/botuser/GymMindAI/ecosystem.production.config.js
+    owner: botuser:botuser
+    permissions: '0644'
+    content: |
+      module.exports = {
+        apps: [{
+          name: 'fitnessbotai',
+          script: 'src/index.js',
+          instances: 1,
+          exec_mode: 'fork',
+          max_memory_restart: '1G',
+          node_args: '--max-old-space-size=1024',
+          env: {
+            NODE_ENV: 'production',
+            PORT: 3004
+          },
+          log_file: '/var/log/fitnessbotai/combined.log',
+          out_file: '/var/log/fitnessbotai/out.log',
+          error_file: '/var/log/fitnessbotai/error.log',
+          log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+          merge_logs: true,
+          
+          // Автоматический перезапуск
+          watch: false,
+          ignore_watch: ['node_modules', 'data', 'logs'],
+          
+          // Перезапуск при падении
+          restart_delay: 1000,
+          max_restarts: 10,
+          min_uptime: '10s'
+        }]
+      };
+
+  # Шаблон .env файла
+  - path: /home/botuser/GymMindAI/.env.template
+    owner: botuser:botuser
+    permissions: '0600'
+    content: |
+      # ===== НАСТРОЙКИ TELEGRAM БОТА =====
+      TELEGRAM_BOT_TOKEN=YOUR_BOT_TOKEN_HERE
+      TELEGRAM_BOT_USERNAME=YOUR_BOT_USERNAME_HERE
+      
+      # ===== НАСТРОЙКИ COZE API =====
+      COZE_API_KEY=YOUR_COZE_API_KEY_HERE
+      COZE_BOT_ID=YOUR_COZE_BOT_ID_HERE
+      COZE_WORKFLOW_ID=YOUR_WORKFLOW_ID_HERE
+      
+      # Отдельные Workflow ID
+      COZE_DEEP_RESEARCH_WORKFLOW_ID=YOUR_WORKFLOW_ID_HERE
+      COZE_TRAINING_PROGRAM_WORKFLOW_ID=YOUR_WORKFLOW_ID_HERE
+      COZE_NUTRITION_PLAN_WORKFLOW_ID=YOUR_WORKFLOW_ID_HERE
+      COZE_COMPOSITION_ANALYSIS_WORKFLOW_ID=YOUR_WORKFLOW_ID_HERE
+      
+      # ===== НАСТРОЙКИ YOOKASSA =====
+      PAYMENT_MODE=production
+      YOOKASSA_PROD_SHOP_ID=YOUR_SHOP_ID_HERE
+      YOOKASSA_PROD_SECRET_KEY=YOUR_SECRET_KEY_HERE
+      
+      # ===== НАСТРОЙКИ СЕРВЕРА =====
+      PORT=3004
+      WEBHOOK_URL=https://YOUR_DOMAIN.com/webhook
+      
+      # ===== БАЗА ДАННЫХ =====
+      DATABASE_PATH=./data/subscriptions.db
+      
+      # ===== ЦЕНЫ ПОДПИСОК =====
+      BASIC_PRICE=150
+      STANDARD_PRICE=300
+      PREMIUM_PRICE=450
+      
+      # ===== АДМИН =====
+      ADMIN_IDS=YOUR_TELEGRAM_ID_HERE
+
+  # Скрипт для быстрого деплоя
+  - path: /home/botuser/GymMindAI/deploy-production.sh
+    owner: botuser:botuser
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      
+      echo "🚀 Запуск деплоя FitnessBotAI в продакшене..."
+      
+      # Переходим в директорию проекта
+      cd /home/botuser/GymMindAI
+      
+      # Проверяем .env файл
+      if [ ! -f .env ]; then
+          echo "❌ Файл .env не найден! Скопируйте .env.template в .env и настройте переменные."
+          exit 1
+      fi
+      
+      # Обновляем зависимости
+      echo "📦 Установка зависимостей..."
+      npm install --production
+      
+      # Останавливаем старую версию (если запущена)
+      echo "🛑 Остановка старой версии..."
+      pm2 stop fitnessbotai || true
+      pm2 delete fitnessbotai || true
+      
+      # Запускаем новую версию
+      echo "▶️ Запуск бота..."
+      pm2 start ecosystem.production.config.js
+      
+      # Сохраняем конфигурацию PM2
+      pm2 save
+      
+      # Активируем Nginx конфигурацию
+      ln -sf /etc/nginx/sites-available/fitnessbotai /etc/nginx/sites-enabled/
+      nginx -t && systemctl reload nginx
+      
+      echo "✅ Деплой завершен!"
+      echo "📊 Статус: pm2 status"
+      echo "📄 Логи: pm2 logs fitnessbotai"
+      
+      pm2 status
+
+  # Скрипт мониторинга
+  - path: /home/botuser/monitor.sh
+    owner: botuser:botuser
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      
+      echo "📊 Мониторинг FitnessBotAI"
+      echo "=========================="
+      
+      # Статус PM2
+      echo "🔄 PM2 статус:"
+      pm2 status
+      
+      echo ""
+      echo "💾 Использование памяти:"
+      free -h
+      
+      echo ""
+      echo "💽 Использование диска:"
+      df -h
+      
+      echo ""
+      echo "⚡ Загрузка CPU:"
+      top -bn1 | grep "Cpu(s)" | awk '{print $2 + $4}'
+      
+      echo ""
+      echo "🌐 Сетевые подключения:"
+      netstat -tuln | grep :3004
+      
+      echo ""
+      echo "📄 Последние 10 строк лога:"
+      tail -n 10 /var/log/fitnessbotai/combined.log
+
+# Финальные команды
+final_message: |
+  ===== СЕРВЕР FITNESSBOTAI НАСТРОЕН! =====
+  
+  Следующие шаги:
+  1. Подключитесь к серверу: ssh root@YOUR_SERVER_IP
+  2. Настройте .env: cp /home/botuser/GymMindAI/.env.template /home/botuser/GymMindAI/.env
+  3. Отредактируйте .env файл с вашими данными
+  4. Запустите бота: sudo -u botuser /home/botuser/GymMindAI/deploy-production.sh
+  
+  Полезные команды:
+  - Статус бота: sudo -u botuser pm2 status
+  - Логи: sudo -u botuser pm2 logs fitnessbotai
+  - Мониторинг: sudo -u botuser /home/botuser/monitor.sh
+  - Перезапуск: sudo -u botuser pm2 restart fitnessbotai
+  
+  Файлы логов: /var/log/fitnessbotai/
+  Конфигурация Nginx: /etc/nginx/sites-available/fitnessbotai
