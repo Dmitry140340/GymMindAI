@@ -29,7 +29,83 @@ function initializePaymentMode() {
 }
 
 export async function handlePaymentWebhook(data, bot) {
-  console.log('handlePaymentWebhook called');
+  console.log('🔔 Payment webhook received:', JSON.stringify(data, null, 2));
+  
+  try {
+    // Проверяем тип события
+    if (data.event !== 'payment.succeeded') {
+      console.log(`⚠️ Ignoring webhook event: ${data.event}`);
+      return;
+    }
+
+    const payment = data.object;
+    console.log('💳 Processing successful payment:', payment.id);
+
+    // Получаем данные из metadata
+    const telegramId = payment.metadata?.telegram_id;
+    const planType = payment.metadata?.plan_type;
+    
+    if (!telegramId || !planType) {
+      console.error('❌ Missing metadata in payment:', { telegramId, planType });
+      return;
+    }
+
+    console.log(`✅ Payment successful for user ${telegramId}, plan: ${planType}`);
+
+    // Определяем детали плана
+    const planDetails = {
+      'basic': { requests_limit: 100, name: 'Базовый' },
+      'standard': { requests_limit: 300, name: 'Стандартный' },
+      'premium': { requests_limit: 600, name: 'Премиум' }
+    };
+
+    const plan = planDetails[planType];
+    if (!plan) {
+      console.error('❌ Unknown plan type:', planType);
+      return;
+    }
+
+    // Импортируем функции для работы с БД
+    const { updateUserSubscription } = await import('./database.js');
+    
+    // Обновляем подписку пользователя
+    const subscriptionEnd = new Date();
+    subscriptionEnd.setMonth(subscriptionEnd.getMonth() + 1); // +1 месяц
+
+    await updateUserSubscription(telegramId, {
+      subscription_type: planType,
+      subscription_end: subscriptionEnd.toISOString(),
+      requests_used: 0,
+      requests_limit: plan.requests_limit,
+      payment_id: payment.id
+    });
+
+    console.log('💾 Subscription updated in database');
+
+    // Отправляем уведомление пользователю
+    const successMessage = `🎉 **Оплата успешно завершена!**
+
+✅ **План:** ${plan.name}
+💰 **Сумма:** ${payment.amount.value} ${payment.amount.currency}
+📊 **Лимит запросов:** ${plan.requests_limit}
+📅 **Действует до:** ${subscriptionEnd.toLocaleDateString('ru-RU')}
+
+Теперь вы можете пользоваться всеми возможностями бота! 🚀`;
+
+    await bot.sendMessage(telegramId, successMessage, { 
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [[
+          { text: '🏠 Главное меню', callback_data: 'main_menu' }
+        ]]
+      }
+    });
+
+    console.log('📨 Success notification sent to user');
+
+  } catch (error) {
+    console.error('❌ Error processing payment webhook:', error);
+  }
 }
 
 export async function createSubscriptionPayment(telegramId, planType) {

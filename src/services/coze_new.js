@@ -66,12 +66,25 @@ async function runSimpleWorkflow(workflowId, parameters) {
     console.log('📄 Данные ответа:', JSON.stringify(response.data, null, 2));
 
     if (response.data && response.data.code === 0) {
-      const data = response.data.data;
-      if (data.output) {
+      let data = response.data.data;
+      
+      // Если data - это строка JSON, парсим её
+      if (typeof data === 'string') {
+        try {
+          data = JSON.parse(data);
+          console.log('📦 Распарсенные данные:', JSON.stringify(data, null, 2));
+        } catch (parseError) {
+          console.log('⚠️ Ошибка парсинга data как JSON:', parseError.message);
+          console.log('📝 Raw data:', data);
+        }
+      }
+      
+      if (data && (data.output || data.output_final)) {
+        const output = data.output || data.output_final;
         return {
           success: true,
           data: data,
-          message: data.output
+          message: output
         };
       } else {
         return {

@@ -1788,4 +1788,79 @@ export async function deleteAllGoals(userId) {
   });
 }
 
+// Обновление подписки пользователя после оплаты
+export async function updateUserSubscription(telegramId, subscriptionData) {
+  return new Promise((resolve, reject) => {
+    console.log(`📝 Updating subscription for user ${telegramId}:`, subscriptionData);
+    
+    // Сначала получаем или создаем пользователя
+    db.get(
+      'SELECT id FROM users WHERE telegram_id = ?',
+      [telegramId],
+      (err, user) => {
+        if (err) {
+          console.error('❌ Error finding user:', err);
+          reject(err);
+          return;
+        }
+
+        if (!user) {
+          console.log('👤 User not found, creating new user');
+          // Создаем пользователя если не существует
+          db.run(
+            `INSERT INTO users (telegram_id, created_at, last_activity) 
+             VALUES (?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+            [telegramId],
+            function(insertErr) {
+              if (insertErr) {
+                console.error('❌ Error creating user:', insertErr);
+                reject(insertErr);
+                return;
+              }
+              
+              const userId = this.lastID;
+              updateSubscription(userId, subscriptionData, resolve, reject);
+            }
+          );
+        } else {
+          updateSubscription(user.id, subscriptionData, resolve, reject);
+        }
+      }
+    );
+  });
+
+  function updateSubscription(userId, data, resolve, reject) {
+    console.log(`💳 Updating subscription for user ID ${userId}`);
+    
+    // Обновляем или вставляем подписку
+    db.run(
+      `INSERT OR REPLACE INTO subscriptions 
+       (user_id, plan_type, status, start_date, end_date, payment_id, requests_limit, requests_used) 
+       VALUES (?, ?, 'active', CURRENT_TIMESTAMP, ?, ?, ?, ?)`,
+      [
+        userId, 
+        data.subscription_type,
+        data.subscription_end,
+        data.payment_id,
+        data.requests_limit,
+        data.requests_used || 0
+      ],
+      function(err) {
+        if (err) {
+          console.error('❌ Error updating subscription:', err);
+          reject(err);
+          return;
+        }
+
+        console.log('✅ Subscription updated successfully');
+        resolve({
+          success: true,
+          subscription_id: this.lastID,
+          user_id: userId
+        });
+      }
+    );
+  }
+}
+
 export { db };
