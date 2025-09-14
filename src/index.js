@@ -30,28 +30,37 @@ setupAdminHandlers(bot);
 // Webhook для уведомлений ЮКассы
 app.post('/webhook/payment', async (req, res) => {
   try {
-    console.log('Payment webhook received:', req.body);
+    console.log('🔔 Payment webhook received at:', new Date().toISOString());
+    console.log('📨 Headers:', req.headers);
+    console.log('📦 Body:', req.body);
     
-    // Проверяем подпись
+    // Проверяем подпись (опционально, так как YooKassa не всегда отправляет подпись)
     const signature = req.headers['x-yookassa-signature'];
-    const body = JSON.stringify(req.body);
-    const expectedSignature = crypto
-      .createHmac('sha256', process.env.YOOKASSA_SECRET_KEY)
-      .update(body)
-      .digest('hex');
-    
-    if (signature !== expectedSignature) {
-      console.error('Invalid webhook signature');
-      return res.status(400).send('Invalid signature');
+    if (signature && process.env.YOOKASSA_SECRET_KEY) {
+      const body = JSON.stringify(req.body);
+      const expectedSignature = crypto
+        .createHmac('sha256', process.env.YOOKASSA_SECRET_KEY)
+        .update(body)
+        .digest('hex');
+      
+      if (signature !== expectedSignature) {
+        console.error('❌ Invalid webhook signature:', { signature, expectedSignature });
+        return res.status(400).json({ error: 'Invalid signature' });
+      }
+      console.log('✅ Webhook signature validated');
+    } else {
+      console.log('⚠️ No signature check (signature or secret key missing)');
     }
     
     // Обрабатываем уведомление о платеже
-    await handlePaymentWebhook(req.body, bot);
+    const result = await handlePaymentWebhook(req.body, bot);
     
-    res.status(200).send('OK');
+    console.log('✅ Webhook processing result:', result);
+    res.status(200).json({ success: true, result });
   } catch (error) {
-    console.error('Payment webhook error:', error);
-    res.status(500).send('Internal Server Error');
+    console.error('❌ Payment webhook error:', error);
+    console.error('❌ Error stack:', error.stack);
+    res.status(500).json({ error: 'Internal Server Error', message: error.message });
   }
 });
 

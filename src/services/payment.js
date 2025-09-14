@@ -35,22 +35,32 @@ export async function handlePaymentWebhook(data, bot) {
     // Проверяем тип события
     if (data.event !== 'payment.succeeded') {
       console.log(`⚠️ Ignoring webhook event: ${data.event}`);
-      return;
+      return { success: false, message: `Ignored event: ${data.event}` };
     }
 
     const payment = data.object;
-    console.log('💳 Processing successful payment:', payment.id);
+    console.log('💳 Processing successful payment:', {
+      id: payment.id,
+      amount: payment.amount,
+      status: payment.status,
+      paid: payment.paid,
+      metadata: payment.metadata
+    });
 
     // Получаем данные из metadata
     const telegramId = payment.metadata?.telegram_id;
     const planType = payment.metadata?.plan_type;
     
     if (!telegramId || !planType) {
-      console.error('❌ Missing metadata in payment:', { telegramId, planType });
-      return;
+      console.error('❌ Missing metadata in payment:', { 
+        telegramId, 
+        planType, 
+        fullMetadata: payment.metadata 
+      });
+      return { success: false, message: 'Missing metadata' };
     }
 
-    console.log(`✅ Payment successful for user ${telegramId}, plan: ${planType}`);
+    console.log(`✅ Payment successful for user ${telegramId}, plan: ${planType}, amount: ${payment.amount.value} ${payment.amount.currency}`);
 
     // Определяем детали плана
     const planDetails = {
@@ -83,28 +93,87 @@ export async function handlePaymentWebhook(data, bot) {
     console.log('💾 Subscription updated in database');
 
     // Отправляем уведомление пользователю
+    const subscriptionEndFormatted = new Date(subscriptionEnd).toLocaleDateString('ru-RU', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+
     const successMessage = `🎉 **Оплата успешно завершена!**
 
 ✅ **План:** ${plan.name}
-💰 **Сумма:** ${payment.amount.value} ${payment.amount.currency}
-📊 **Лимит запросов:** ${plan.requests_limit}
-📅 **Действует до:** ${subscriptionEnd.toLocaleDateString('ru-RU')}
+💰 **Сумма:** ${payment.amount.value} ₽
+📊 **Лимит запросов:** ${plan.requests_limit} в месяц
+📅 **Действует до:** ${subscriptionEndFormatted}
+🆔 **ID платежа:** ${payment.id}
 
-Теперь вы можете пользоваться всеми возможностями бота! 🚀`;
+🚀 **Теперь вы можете пользоваться всеми возможностями бота!**
 
-    await bot.sendMessage(telegramId, successMessage, { 
-      parse_mode: 'Markdown',
-      reply_markup: {
-        inline_keyboard: [[
-          { text: '🏠 Главное меню', callback_data: 'main_menu' }
-        ]]
+Ваши доступные функции:
+• Составление персональных тренировок �
+• Планы питания и калории 🥗
+• Отслеживание прогресса 📈
+• AI-рекомендации 🤖`;
+
+    try {
+      await bot.sendMessage(telegramId, successMessage, { 
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '🏠 Главное меню', callback_data: 'main_menu' },
+            { text: '📊 Мой статус', callback_data: 'my_status' }
+          ]]
+        }
+      });
+
+      console.log('📨 Success notification sent to user', telegramId);
+    } catch (notificationError) {
+      console.error('❌ Failed to send success notification:', notificationError.message);
+      // Не критическая ошибка, продолжаем выполнение
+    }
+
+    // Отправляем уведомление администратору о новой оплате
+    try {
+      const adminId = process.env.ADMIN_TELEGRAM_ID;
+      if (adminId) {
+        const adminMessage = `💰 **Новая оплата!**
+
+👤 **Пользователь:** ${telegramId}
+📦 **План:** ${plan.name}
+💵 **Сумма:** ${payment.amount.value} ₽
+🆔 **ID платежа:** ${payment.id}
+📅 **Действует до:** ${subscriptionEndFormatted}`;
+
+        await bot.sendMessage(adminId, adminMessage, { parse_mode: 'Markdown' });
+        console.log('📨 Admin notification sent');
       }
-    });
+    } catch (adminError) {
+      console.error('❌ Failed to send admin notification:', adminError.message);
+    }
 
-    console.log('📨 Success notification sent to user');
+    return { 
+      success: true, 
+      message: 'Payment processed successfully',
+      telegramId,
+      planType,
+      paymentId: payment.id 
+    };
 
   } catch (error) {
     console.error('❌ Error processing payment webhook:', error);
+    console.error('❌ Error stack:', error.stack);
+    
+    // Попробуем отправить уведомление об ошибке администратору
+    try {
+      const adminId = process.env.ADMIN_TELEGRAM_ID;
+      if (adminId && bot) {
+        await bot.sendMessage(adminId, `❌ Ошибка обработки платежа:\n\nPayment ID: ${data?.object?.id}\nError: ${error.message}`);
+      }
+    } catch (notifyError) {
+      console.error('❌ Failed to notify admin:', notifyError.message);
+    }
+    
+    return { success: false, error: error.message };
   }
 }
 

@@ -1830,34 +1830,60 @@ export async function updateUserSubscription(telegramId, subscriptionData) {
   });
 
   function updateSubscription(userId, data, resolve, reject) {
-    console.log(`💳 Updating subscription for user ID ${userId}`);
+    console.log(`💳 Updating subscription for user ID ${userId}`, data);
     
-    // Обновляем или вставляем подписку
+    // Сначала проверим существующие активные подписки
     db.run(
-      `INSERT OR REPLACE INTO subscriptions 
-       (user_id, plan_type, status, start_date, end_date, payment_id, requests_limit, requests_used) 
-       VALUES (?, ?, 'active', CURRENT_TIMESTAMP, ?, ?, ?, ?)`,
-      [
-        userId, 
-        data.subscription_type,
-        data.subscription_end,
-        data.payment_id,
-        data.requests_limit,
-        data.requests_used || 0
-      ],
-      function(err) {
-        if (err) {
-          console.error('❌ Error updating subscription:', err);
-          reject(err);
+      `UPDATE subscriptions 
+       SET status = 'expired', updated_at = CURRENT_TIMESTAMP 
+       WHERE user_id = ? AND status = 'active'`,
+      [userId],
+      (updateErr) => {
+        if (updateErr) {
+          console.error('❌ Error deactivating old subscriptions:', updateErr);
+          reject(updateErr);
           return;
         }
 
-        console.log('✅ Subscription updated successfully');
-        resolve({
-          success: true,
-          subscription_id: this.lastID,
-          user_id: userId
-        });
+        console.log('✅ Deactivated old subscriptions for user', userId);
+
+        // Теперь создаем новую активную подписку
+        const startDate = new Date().toISOString();
+        
+        db.run(
+          `INSERT INTO subscriptions 
+           (user_id, plan_type, status, start_date, end_date, payment_id, requests_limit, requests_used, created_at, updated_at) 
+           VALUES (?, ?, 'active', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          [
+            userId, 
+            data.subscription_type,
+            startDate,
+            data.subscription_end,
+            data.payment_id,
+            data.requests_limit,
+            data.requests_used || 0
+          ],
+          function(err) {
+            if (err) {
+              console.error('❌ Error creating new subscription:', err);
+              reject(err);
+              return;
+            }
+
+            console.log('✅ New subscription created successfully:', {
+              subscription_id: this.lastID,
+              user_id: userId,
+              plan_type: data.subscription_type,
+              end_date: data.subscription_end
+            });
+            
+            resolve({
+              success: true,
+              subscription_id: this.lastID,
+              user_id: userId
+            });
+          }
+        );
       }
     );
   }
