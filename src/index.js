@@ -118,6 +118,16 @@ app.get('/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
+// GET endpoint для webhook (для диагностики)
+app.get('/webhook/payment', (req, res) => {
+  res.json({ 
+    message: 'Payment webhook endpoint is ready', 
+    method: 'Use POST to send payment notifications',
+    timestamp: new Date().toISOString(),
+    server_ip: req.ip
+  });
+});
+
 // Обработка ошибок бота
 bot.on('error', (error) => {
   console.error('Bot error:', error);
