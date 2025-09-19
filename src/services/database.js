@@ -506,65 +506,41 @@ export async function createSubscription(telegramId, planType, amount, paymentId
     try {
       // Сначала получаем внутренний ID пользователя
       let user = await getUserByTelegramId(telegramId);
-      
       // Если пользователь не найден, создаем его
       if (!user) {
         console.log(`Пользователь ${telegramId} не найден, создаем нового`);
-        await createOrUpdateUser({
-          id: telegramId,
-          username: null,
-          first_name: 'Unknown User'
-        });
+        await createOrUpdateUser({ id: telegramId, username: null, first_name: 'Unknown User' });
         user = await getUserByTelegramId(telegramId);
-        
         if (!user) {
           reject(new Error('Не удалось создать пользователя'));
           return;
         }
       }
-      
+
       const userId = user.id;
       const endDate = new Date();
-      endDate.setMonth(endDate.getMonth() + 1); // Все планы на месяц
-      
+      endDate.setMonth(endDate.getMonth() + 1); // +1 месяц
+
       // Определяем лимит запросов на основе плана
-      const requestsLimits = {
-        'basic': 100,
-        'standard': 300,
-        'premium': 600
-      };
+      const requestsLimits = { basic: 100, standard: 300, premium: 600 };
       const requestsLimit = requestsLimits[planType] || 100;
 
-      // Сначала создаем подписку без access_token
+      // Генерируем токен сразу и создаем активную подписку
+      const accessToken = generateAccessToken(userId, paymentId);
+
       db.run(
-        `INSERT INTO subscriptions (user_id, plan_type, status, start_date, end_date, payment_id, amount, requests_limit, requests_used)
-         VALUES (?, ?, 'pending', CURRENT_TIMESTAMP, ?, ?, ?, ?, 0)`,
-        [userId, planType, endDate.toISOString(), paymentId, amount, requestsLimit],
+        `INSERT INTO subscriptions 
+           (user_id, plan_type, status, start_date, end_date, payment_id, amount, requests_limit, requests_used, access_token, created_at, updated_at)
+         VALUES (?, ?, 'active', CURRENT_TIMESTAMP, ?, ?, ?, ?, 0, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        [userId, planType, endDate.toISOString(), paymentId, amount, requestsLimit, accessToken],
         function(err) {
           if (err) {
             reject(err);
             return;
           }
-          
-          const subscriptionId = this.lastID;
-          
-          // Генерируем уникальный токен доступа
-          const accessToken = generateAccessToken(userId, paymentId);
-          
-          // Обновляем подписку, добавляя access_token
-          db.run(
-            `UPDATE subscriptions SET access_token = ? WHERE id = ?`,
-            [accessToken, subscriptionId],
-            function(updateErr) {
-              if (updateErr) {
-                console.log('Предупреждение: не удалось добавить access_token:', updateErr.message);
-                // Не прерываем выполнение, так как подписка уже создана
-              }
-            resolve(subscriptionId);
-          }
-        );
-      }
-    );
+          resolve(this.lastID);
+        }
+      );
     } catch (error) {
       reject(error);
     }
@@ -783,14 +759,14 @@ export async function updateTokenUsage(token) {
 }
 
 // Получение всех подписок пользователя для отладки
-export async function getAllUserSubscriptions(telegramId) {
+export async function getAllUserSubscriptions(userIdOrTelegramId) {
   return new Promise((resolve, reject) => {
     db.all(
       `SELECT s.* FROM subscriptions s 
        JOIN users u ON s.user_id = u.id 
-       WHERE u.telegram_id = ?
+       WHERE u.telegram_id = ? OR u.id = ?
        ORDER BY s.created_at DESC`,
-      [telegramId],
+      [userIdOrTelegramId, userIdOrTelegramId],
       (err, rows) => {
         if (err) {
           reject(err);
@@ -1852,14 +1828,15 @@ export async function updateUserSubscription(telegramId, subscriptionData) {
         
         db.run(
           `INSERT INTO subscriptions 
-           (user_id, plan_type, status, start_date, end_date, payment_id, requests_limit, requests_used, created_at, updated_at) 
-           VALUES (?, ?, 'active', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+           (user_id, plan_type, status, start_date, end_date, payment_id, amount, requests_limit, requests_used, created_at, updated_at) 
+           VALUES (?, ?, 'active', ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
           [
             userId, 
             data.subscription_type,
             startDate,
             data.subscription_end,
             data.payment_id,
+            data.amount || null,
             data.requests_limit,
             data.requests_used || 0
           ],

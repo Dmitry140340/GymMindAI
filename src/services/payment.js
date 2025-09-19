@@ -32,6 +32,18 @@ export async function handlePaymentWebhook(data, bot) {
   console.log('🔔 Payment webhook received:', JSON.stringify(data, null, 2));
   
   try {
+    // Гарантируем, что БД инициализирована (актуально для тестов/автономного вызова)
+    try {
+      const { initDatabase, db } = await import('./database.js');
+      // Если переменная соединения еще не создана — инициализируем
+      if (!db) {
+        console.log('🗄️ DB not initialized from context, initializing...');
+        await initDatabase();
+      }
+    } catch (dbInitErr) {
+      console.warn('⚠️ Could not proactively ensure DB init (will proceed):', dbInitErr.message);
+    }
+
     // Проверяем тип события
     if (data.event !== 'payment.succeeded') {
       console.log(`⚠️ Ignoring webhook event: ${data.event}`);
@@ -87,7 +99,8 @@ export async function handlePaymentWebhook(data, bot) {
       subscription_end: subscriptionEnd.toISOString(),
       requests_used: 0,
       requests_limit: plan.requests_limit,
-      payment_id: payment.id
+      payment_id: payment.id,
+      amount: parseFloat(payment.amount?.value || '0')
     });
 
     console.log('💾 Subscription updated in database');
@@ -99,21 +112,21 @@ export async function handlePaymentWebhook(data, bot) {
       day: 'numeric'
     });
 
-    const successMessage = `🎉 **Оплата успешно завершена!**
+  const successMessage = `🎉 **Оплата успешно завершена!**
 
 ✅ **План:** ${plan.name}
 💰 **Сумма:** ${payment.amount.value} ₽
 📊 **Лимит запросов:** ${plan.requests_limit} в месяц
 📅 **Действует до:** ${subscriptionEndFormatted}
-🆔 **ID платежа:** ${payment.id}
+🔔 **ID платежа:** ${payment.id}
 
 🚀 **Теперь вы можете пользоваться всеми возможностями бота!**
 
 Ваши доступные функции:
-• Составление персональных тренировок �
-• Планы питания и калории 🥗
+• Персональные программы тренировок 🏋️‍♂️
+• Планы питания и расчет КБЖУ 🥗
 • Отслеживание прогресса 📈
-• AI-рекомендации 🤖`;
+• AI‑рекомендации 🤖`;
 
     try {
       await bot.sendMessage(telegramId, successMessage, { 
@@ -177,7 +190,12 @@ export async function handlePaymentWebhook(data, bot) {
   }
 }
 
-export async function createSubscriptionPayment(telegramId, planType) {
+export async function createSubscriptionPayment(telegramUserOrId, planType, amountOverride = null, descriptionOverride = null) {
+  // Поддерживаем как передачу объекта пользователя, так и прямого telegram_id
+  const telegramId = (typeof telegramUserOrId === 'object' && telegramUserOrId)
+    ? (telegramUserOrId.telegram_id || telegramUserOrId.id)
+    : telegramUserOrId;
+
   console.log(`Creating payment for user ${telegramId}, plan: ${planType}`);
   
   try {
@@ -211,17 +229,18 @@ export async function createSubscriptionPayment(telegramId, planType) {
     // Формируем данные для YooKassa
     const paymentData = {
       amount: {
-        value: plan.amount,
+        value: (amountOverride || plan.amount).toString(),
         currency: 'RUB'
       },
       confirmation: {
         type: 'redirect',
-        return_url: process.env.WEBHOOK_URL || 'https://t.me/your_bot_username'
+        // На стороне YooKassa это URL возврата после оплаты (а не URL вебхука)
+        return_url: process.env.RETURN_URL || 'https://t.me/GymMindAI_bot'
       },
       capture: true,
-      description: `${plan.description} для Telegram ID: ${telegramId}`,
+      description: `${(descriptionOverride || plan.description)} для Telegram ID: ${telegramId}`,
       metadata: {
-        telegram_id: telegramId.toString(),
+        telegram_id: String(telegramId),
         plan_type: planType,
         requests_limit: plan.requests_limit.toString()
       }
@@ -255,13 +274,14 @@ export async function createSubscriptionPayment(telegramId, planType) {
     console.log('YooKassa response:', response.data);
 
     if (response.data && response.data.confirmation && response.data.confirmation.confirmation_url) {
+      // Возвращаем структуру, ожидаемую тестами: payment внутри результата
       return {
         success: true,
-        paymentId: response.data.id,
+        payment: response.data,
         paymentUrl: response.data.confirmation.confirmation_url,
-        amount: plan.amount,
+        amount: response.data.amount?.value || paymentData.amount.value,
         planType: planType,
-        description: plan.description
+        description: descriptionOverride || plan.description
       };
     } else {
       return { success: false, error: 'Не удалось создать платеж' };
