@@ -84,35 +84,45 @@ export async function handlePaymentWebhook(data, bot) {
     const plan = planDetails[planType];
     if (!plan) {
       console.error('❌ Unknown plan type:', planType);
-      return;
+      return { success: false, message: 'Unknown plan type' };
     }
 
     // Импортируем функции для работы с БД
-    const { updateUserSubscription } = await import('./database.js');
+    const { createOrUpdateUser, getUserByTelegramId, createSubscription, activateSubscription } = await import('./database.js');
     
-    // Обновляем подписку пользователя
-    const subscriptionEnd = new Date();
-    subscriptionEnd.setMonth(subscriptionEnd.getMonth() + 1); // +1 месяц
+    // Проверяем/создаем пользователя
+    await createOrUpdateUser({ id: telegramId, username: null, first_name: 'User' });
+    const dbUser = await getUserByTelegramId(telegramId);
+    
+    if (!dbUser) {
+      console.error('❌ Could not find or create user:', telegramId);
+      return { success: false, message: 'User not found' };
+    }
 
-    await updateUserSubscription(telegramId, {
-      subscription_type: planType,
-      subscription_end: subscriptionEnd.toISOString(),
-      requests_used: 0,
-      requests_limit: plan.requests_limit,
-      payment_id: payment.id,
-      amount: parseFloat(payment.amount?.value || '0')
-    });
+    // Создаем подписку если её нет
+    const subscriptionId = await createSubscription(
+      telegramId,
+      planType,
+      parseFloat(payment.amount?.value || '0'),
+      payment.id
+    );
+    
+    console.log('💾 Subscription created/updated:', subscriptionId);
 
-    console.log('💾 Subscription updated in database');
+    // Активируем подписку
+    await activateSubscription(payment.id, planType);
+    console.log('✅ Subscription activated');
 
-    // Отправляем уведомление пользователю
-    const subscriptionEndFormatted = new Date(subscriptionEnd).toLocaleDateString('ru-RU', {
+    // Отправляем уведомление пользователю об успешной оплате
+    const subscriptionEndDate = new Date();
+    subscriptionEndDate.setMonth(subscriptionEndDate.getMonth() + 1);
+    const subscriptionEndFormatted = subscriptionEndDate.toLocaleDateString('ru-RU', {
       year: 'numeric',
       month: 'long',
       day: 'numeric'
     });
 
-  const successMessage = `🎉 **Оплата успешно завершена!**
+    const successMessage = `🎉 **Оплата успешно завершена!**
 
 ✅ **План:** ${plan.name}
 💰 **Сумма:** ${payment.amount.value} ₽
@@ -126,14 +136,16 @@ export async function handlePaymentWebhook(data, bot) {
 • Персональные программы тренировок 🏋️‍♂️
 • Планы питания и расчет КБЖУ 🥗
 • Отслеживание прогресса 📈
-• AI‑рекомендации 🤖`;
+• AI‑рекомендации 🤖
+
+Используйте /start для начала работы с ботом!`;
 
     try {
       await bot.sendMessage(telegramId, successMessage, { 
         parse_mode: 'Markdown',
         reply_markup: {
           inline_keyboard: [[
-            { text: '🏠 Главное меню', callback_data: 'main_menu' },
+            { text: '🏠 Начать работу', callback_data: 'start_work' },
             { text: '📊 Мой статус', callback_data: 'my_status' }
           ]]
         }
@@ -142,7 +154,24 @@ export async function handlePaymentWebhook(data, bot) {
       console.log('📨 Success notification sent to user', telegramId);
     } catch (notificationError) {
       console.error('❌ Failed to send success notification:', notificationError.message);
-      // Не критическая ошибка, продолжаем выполнение
+      
+      // Попробуем отправить упрощенное сообщение без Markdown
+      try {
+        const simpleMessage = `🎉 Оплата успешно завершена!\n\n✅ План: ${plan.name}\n💰 Сумма: ${payment.amount.value} ₽\n📊 Лимит запросов: ${plan.requests_limit} в месяц\n📅 Действует до: ${subscriptionEndFormatted}\n\nИспользуйте /start для начала работы с ботом!`;
+        
+        await bot.sendMessage(telegramId, simpleMessage, {
+          reply_markup: {
+            inline_keyboard: [[
+              { text: '🏠 Начать работу', callback_data: 'start_work' },
+              { text: '📊 Мой статус', callback_data: 'my_status' }
+            ]]
+          }
+        });
+        console.log('📨 Simple success notification sent to user', telegramId);
+      } catch (secondError) {
+        console.error('❌ Failed to send simple notification as well:', secondError.message);
+        // Не критическая ошибка, продолжаем выполнение
+      }
     }
 
     // Отправляем уведомление администратору о новой оплате
@@ -169,7 +198,8 @@ export async function handlePaymentWebhook(data, bot) {
       message: 'Payment processed successfully',
       telegramId,
       planType,
-      paymentId: payment.id 
+      paymentId: payment.id,
+      subscriptionId 
     };
 
   } catch (error) {

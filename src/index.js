@@ -32,7 +32,7 @@ app.post('/webhook/payment', async (req, res) => {
   try {
     console.log('🔔 Payment webhook received at:', new Date().toISOString());
     console.log('📨 Headers:', req.headers);
-    console.log('📦 Body:', req.body);
+    console.log('📦 Body:', JSON.stringify(req.body, null, 2));
     
     // Проверяем подпись (опционально, так как YooKassa не всегда отправляет подпись)
     const signature = req.headers['x-yookassa-signature'];
@@ -55,8 +55,15 @@ app.post('/webhook/payment', async (req, res) => {
     // Обрабатываем уведомление о платеже
     const result = await handlePaymentWebhook(req.body, bot);
     
-    console.log('✅ Webhook processing result:', result);
-    res.status(200).json({ success: true, result });
+    console.log('✅ Webhook processing result:', JSON.stringify(result, null, 2));
+    
+    if (result.success) {
+      console.log(`💰 Payment successfully processed for user ${result.telegramId}, plan: ${result.planType}`);
+      res.status(200).json({ success: true, result });
+    } else {
+      console.error(`❌ Payment processing failed: ${result.message || result.error}`);
+      res.status(400).json({ success: false, error: result.message || result.error });
+    }
   } catch (error) {
     console.error('❌ Payment webhook error:', error);
     console.error('❌ Error stack:', error.stack);

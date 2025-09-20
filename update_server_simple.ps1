@@ -137,14 +137,37 @@ if ($success) {
         if ($botStatus.ok) {
             Write-Host "Бот работает после обновления!" -ForegroundColor Green
             
-            # Отправляем уведомление
+            # Отправляем уведомление об успешном обновлении
+            $notificationText = @"
+🎉 **СЕРВЕР ОБНОВЛЕН АВТОМАТИЧЕСКИ**
+
+✅ **Статус:** Обновление завершено успешно
+🔄 **Бот:** Перезапущен и работает
+📂 **Код:** Обновлен с GitHub
+💳 **Система оплаты:** Готова к работе
+🕐 **Время:** $(Get-Date -Format 'dd.MM.yyyy HH:mm')
+
+🚀 **Доступные функции:**
+• Webhook для ЮКассы работает
+• База данных подключена
+• Все планы подписки активны
+• Уведомления настроены
+
+🔗 **Webhook URL:** https://85.198.80.51:3000/webhook/payment
+📊 **Health check:** https://85.198.80.51:3000/health
+"@
+
             $notification = @{
                 chat_id = "659874549"
-                text = "СЕРВЕР ОБНОВЛЕН АВТОМАТИЧЕСКИ`n`nБот перезапущен и работает`nКод обновлен с GitHub`nВремя: $(Get-Date -Format 'dd.MM.yyyy HH:mm')"
+                text = $notificationText
+                parse_mode = "Markdown"
             } | ConvertTo-Json
             
-            Invoke-RestMethod -Uri "https://api.telegram.org/bot8128410187:AAG0B0lsF65xnH0X3Ld2M7IqMK4OlLuK_Y8/sendMessage" -Method Post -Body $notification -ContentType "application/json"
-            Write-Host "Уведомление отправлено администратору" -ForegroundColor Green
+            $notificationResult = Invoke-RestMethod -Uri "https://api.telegram.org/bot8128410187:AAG0B0lsF65xnH0X3Ld2M7IqMK4OlLuK_Y8/sendMessage" -Method Post -Body $notification -ContentType "application/json; charset=utf-8"
+            
+            if ($notificationResult.ok) {
+                Write-Host "Уведомление отправлено в Telegram" -ForegroundColor Green
+            }
         }
     }
     catch {

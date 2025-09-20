@@ -509,7 +509,7 @@ export async function createSubscription(telegramId, planType, amount, paymentId
       // Если пользователь не найден, создаем его
       if (!user) {
         console.log(`Пользователь ${telegramId} не найден, создаем нового`);
-        await createOrUpdateUser({ id: telegramId, username: null, first_name: 'Unknown User' });
+        await createOrUpdateUser({ id: telegramId, username: null, first_name: 'User' });
         user = await getUserByTelegramId(telegramId);
         if (!user) {
           reject(new Error('Не удалось создать пользователя'));
@@ -525,20 +525,35 @@ export async function createSubscription(telegramId, planType, amount, paymentId
       const requestsLimits = { basic: 100, standard: 300, premium: 600 };
       const requestsLimit = requestsLimits[planType] || 100;
 
-      // Генерируем токен сразу и создаем активную подписку
+      // Генерируем токен
       const accessToken = generateAccessToken(userId, paymentId);
 
+      // Деактивируем старые подписки
       db.run(
-        `INSERT INTO subscriptions 
-           (user_id, plan_type, status, start_date, end_date, payment_id, amount, requests_limit, requests_used, access_token, created_at, updated_at)
-         VALUES (?, ?, 'active', CURRENT_TIMESTAMP, ?, ?, ?, ?, 0, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-        [userId, planType, endDate.toISOString(), paymentId, amount, requestsLimit, accessToken],
-        function(err) {
+        `UPDATE subscriptions 
+         SET status = 'expired', updated_at = CURRENT_TIMESTAMP 
+         WHERE user_id = ? AND status = 'active'`,
+        [userId],
+        (err) => {
           if (err) {
-            reject(err);
-            return;
+            console.error('Error deactivating old subscriptions:', err);
           }
-          resolve(this.lastID);
+
+          // Создаем новую подписку со статусом pending
+          db.run(
+            `INSERT INTO subscriptions 
+             (user_id, plan_type, status, start_date, end_date, payment_id, amount, requests_limit, requests_used, access_token, created_at, updated_at)
+             VALUES (?, ?, 'pending', CURRENT_TIMESTAMP, ?, ?, ?, ?, 0, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+            [userId, planType, endDate.toISOString(), paymentId, amount, requestsLimit, accessToken],
+            function(err) {
+              if (err) {
+                reject(err);
+                return;
+              }
+              console.log(`✅ Subscription created with ID: ${this.lastID}, status: pending`);
+              resolve(this.lastID);
+            }
+          );
         }
       );
     } catch (error) {
@@ -547,80 +562,65 @@ export async function createSubscription(telegramId, planType, amount, paymentId
   });
 }
 
-// Генерация токена доступа
-function generateAccessToken(userId, paymentId) {
-  const timestamp = Date.now();
-  const data = `${userId}-${paymentId}-${timestamp}-${process.env.YOOKASSA_SECRET_KEY}`;
-  return crypto.createHash('sha256').update(data).digest('hex').substring(0, 32);
-}
-
-// Активация подписки
+// Активация подписки после успешной оплаты
 export async function activateSubscription(paymentId, planType = null) {
   return new Promise((resolve, reject) => {
-    if (paymentId.startsWith('test_')) {
-      // Тестовая активация - находим подписку по payment_id и активируем её
-      db.get(
-        `SELECT s.*, u.telegram_id 
-         FROM subscriptions s 
-         JOIN users u ON s.user_id = u.id 
-         WHERE s.payment_id = ?`,
-        [paymentId],
-        (err, subscription) => {
-          if (err) {
-            reject(err);
-            return;
-          }
-          
-          if (!subscription) {
-            reject(new Error('Подписка не найдена'));
-            return;
-          }
-          
-          const endDate = new Date();
-          if (subscription.plan_type === 'yearly') {
-            endDate.setFullYear(endDate.getFullYear() + 1);
-          } else {
-            endDate.setMonth(endDate.getMonth() + 1);
-          }
-          
-          const accessToken = generateAccessToken(subscription.user_id, paymentId);
-          
-          db.run(
-            `UPDATE subscriptions 
-             SET status = 'active', 
-                 start_date = CURRENT_TIMESTAMP,
-                 end_date = ?,
-                 access_token = ?,
-                 updated_at = CURRENT_TIMESTAMP
-             WHERE id = ?`,
-            [endDate.toISOString(), accessToken, subscription.id],
-            function(updateErr) {
-              if (updateErr) {
-                reject(updateErr);
-                return;
-              }
-              console.log(`✅ Тестовая подписка ${subscription.id} активирована для пользователя ${subscription.telegram_id}`);
-              resolve(this.changes > 0);
+    // Находим подписку по payment_id
+    db.get(
+      `SELECT s.*, u.telegram_id 
+       FROM subscriptions s 
+       JOIN users u ON s.user_id = u.id 
+       WHERE s.payment_id = ?`,
+      [paymentId],
+      (err, subscription) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        
+        if (!subscription) {
+          reject(new Error(`Подписка с payment_id ${paymentId} не найдена`));
+          return;
+        }
+        
+        // Активируем подписку
+        const endDate = new Date();
+        if (subscription.plan_type === 'yearly') {
+          endDate.setFullYear(endDate.getFullYear() + 1);
+        } else {
+          endDate.setMonth(endDate.getMonth() + 1);
+        }
+        
+        const accessToken = generateAccessToken(subscription.user_id, paymentId);
+        
+        db.run(
+          `UPDATE subscriptions 
+           SET status = 'active', 
+               start_date = CURRENT_TIMESTAMP,
+               end_date = ?,
+               access_token = ?,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?`,
+          [endDate.toISOString(), accessToken, subscription.id],
+          function(updateErr) {
+            if (updateErr) {
+              console.error(`❌ Ошибка активации подписки ${subscription.id}:`, updateErr);
+              reject(updateErr);
+              return;
             }
-          );
-        }
-      );
-    } else {
-      // Обычная активация
-      db.run(
-        `UPDATE subscriptions 
-         SET status = 'active', updated_at = CURRENT_TIMESTAMP 
-         WHERE payment_id = ?`,
-        [paymentId],
-        function(err) {
-          if (err) {
-            reject(err);
-            return;
+            console.log(`✅ Подписка ${subscription.id} активирована для пользователя ${subscription.telegram_id}`);
+            console.log(`📅 Действует до: ${endDate.toISOString()}`);
+            resolve({ 
+              success: true, 
+              subscriptionId: subscription.id,
+              userId: subscription.user_id,
+              telegramId: subscription.telegram_id,
+              endDate: endDate.toISOString()
+            });
           }
-          resolve(this.changes > 0);
-        }
-      );
-    }
+        );
+      }
+    );
   });
 }
 
@@ -1865,5 +1865,7 @@ export async function updateUserSubscription(telegramId, subscriptionData) {
     );
   }
 }
+
+export { db };
 
 export { db };
