@@ -1867,5 +1867,3 @@ export async function updateUserSubscription(telegramId, subscriptionData) {
 }
 
 export { db };
-
-export { db };
