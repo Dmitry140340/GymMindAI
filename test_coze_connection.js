@@ -6,7 +6,7 @@ console.log('====================================\n');
 
 // Константы из .env
 const COZE_API_KEY = 'pat_fAHGFHej2Ek6kUE423HXkuuk7tYJVKjIr1zGS0sKAWddHK9c2qkJP5C30C2VW3mG';
-const COZE_BOT_ID = '7444280037326487566';
+const COZE_BOT_ID = '7428947126656434182';
 const COZE_WORKFLOW_ID = '7446536649765609488';
 
 console.log('📋 Текущие настройки:');
