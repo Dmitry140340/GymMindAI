@@ -5,7 +5,7 @@ console.log('🔗 ТЕСТИРОВАНИЕ ПОДКЛЮЧЕНИЯ К COZE API');
 console.log('====================================\n');
 
 // Константы из .env
-const COZE_API_KEY = 'pat_ZuFCtjJQ6wGG8q1iPJJNsLzOHk5Fa7TFWuGEZN1cqaG1cT9VkJsHHKuVOSC56Hp9';
+const COZE_API_KEY = 'pat_fAHGFHej2Ek6kUE423HXkuuk7tYJVKjIr1zGS0sKAWddHK9c2qkJP5C30C2VW3mG';
 const COZE_BOT_ID = '7444280037326487566';
 const COZE_WORKFLOW_ID = '7446536649765609488';
 
