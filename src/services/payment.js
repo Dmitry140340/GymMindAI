@@ -235,7 +235,7 @@ export async function createSubscriptionPayment(telegramUserOrId, planType, amou
       confirmation: {
         type: 'redirect',
         // На стороне YooKassa это URL возврата после оплаты (а не URL вебхука)
-        return_url: process.env.RETURN_URL || 'https://t.me/GymMindAI_bot'
+        return_url: process.env.RETURN_URL || `https://t.me/${process.env.TELEGRAM_BOT_USERNAME || 'FitnessTrainerAI_bot'}`
       },
       capture: true,
       description: `${(descriptionOverride || plan.description)} для Telegram ID: ${telegramId}`,
