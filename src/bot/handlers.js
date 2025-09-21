@@ -31,7 +31,8 @@ import {
   deleteUserGoal,
   updateUserGoal,
   clearAllUserData,
-  getUserDataSummary
+  getUserDataSummary,
+  getUserPayments
 } from '../services/database.js';
 import { runWorkflow, getConversationId, clearConversation, continueInteractiveWorkflow } from '../services/coze.js';
 import { runCozeChat } from '../services/coze_v3.js';
@@ -164,6 +165,122 @@ async function handleTextMessage(bot, msg) {
       return;
     }
 
+    // Обработка AI команд
+    if (text === '/training_program' || text.startsWith('/training_program')) {
+      userStates.delete(user.id);
+      
+      // Проверяем доступ пользователя
+      const subscription = await getActiveSubscription(dbUser.id);
+      const freeRequests = await getUserFreeRequests(dbUser.id);
+      
+      let hasAccess = false;
+      if (subscription && subscription.status === 'active') {
+        hasAccess = true;
+      } else if (freeRequests.remaining > 0) {
+        hasAccess = true;
+      }
+      
+      if (hasAccess) {
+        await bot.sendMessage(
+          chatId,
+          '🏋️‍♂️ **Создание программы тренировок**\n\n' +
+          '⏳ Анализирую ваши данные и создаю персональную программу...',
+          { parse_mode: 'Markdown' }
+        );
+        
+        try {
+          const result = await runWorkflow(dbUser.id, 'training_program');
+          await bot.sendMessage(chatId, result.response, { parse_mode: 'Markdown', ...mainKeyboard });
+        } catch (error) {
+          console.error('Ошибка создания программы тренировок:', error);
+          await bot.sendMessage(chatId, '❌ Ошибка при создании программы тренировок.', mainKeyboard);
+        }
+      } else {
+        await bot.sendMessage(
+          chatId,
+          '🔒 Доступ ограничен. Оформите подписку для использования ИИ-инструментов.',
+          subscriptionKeyboard
+        );
+      }
+      return;
+    }
+
+    if (text === '/nutrition_plan' || text.startsWith('/nutrition_plan')) {
+      userStates.delete(user.id);
+      
+      const subscription = await getActiveSubscription(dbUser.id);
+      const freeRequests = await getUserFreeRequests(dbUser.id);
+      
+      let hasAccess = false;
+      if (subscription && subscription.status === 'active') {
+        hasAccess = true;
+      } else if (freeRequests.remaining > 0) {
+        hasAccess = true;
+      }
+      
+      if (hasAccess) {
+        await bot.sendMessage(
+          chatId,
+          '🥗 **Создание плана питания**\n\n' +
+          '⏳ Анализирую ваши цели и создаю персональный план питания...',
+          { parse_mode: 'Markdown' }
+        );
+        
+        try {
+          const result = await runWorkflow(dbUser.id, 'nutrition_plan');
+          await bot.sendMessage(chatId, result.response, { parse_mode: 'Markdown', ...mainKeyboard });
+        } catch (error) {
+          console.error('Ошибка создания плана питания:', error);
+          await bot.sendMessage(chatId, '❌ Ошибка при создании плана питания.', mainKeyboard);
+        }
+      } else {
+        await bot.sendMessage(
+          chatId,
+          '🔒 Доступ ограничен. Оформите подписку для использования ИИ-инструментов.',
+          subscriptionKeyboard
+        );
+      }
+      return;
+    }
+
+    if (text === '/progress_analysis' || text.startsWith('/progress_analysis')) {
+      userStates.delete(user.id);
+      
+      const subscription = await getActiveSubscription(dbUser.id);
+      const freeRequests = await getUserFreeRequests(dbUser.id);
+      
+      let hasAccess = false;
+      if (subscription && subscription.status === 'active') {
+        hasAccess = true;
+      } else if (freeRequests.remaining > 0) {
+        hasAccess = true;
+      }
+      
+      if (hasAccess) {
+        await bot.sendMessage(
+          chatId,
+          '📈 **Анализ прогресса**\n\n' +
+          '⏳ Анализирую ваши данные и прогресс...',
+          { parse_mode: 'Markdown' }
+        );
+        
+        try {
+          const result = await runWorkflow(dbUser.id, 'progress_analysis');
+          await bot.sendMessage(chatId, result.response, { parse_mode: 'Markdown', ...mainKeyboard });
+        } catch (error) {
+          console.error('Ошибка анализа прогресса:', error);
+          await bot.sendMessage(chatId, '❌ Ошибка при анализе прогресса.', mainKeyboard);
+        }
+      } else {
+        await bot.sendMessage(
+          chatId,
+          '🔒 Доступ ограничен. Оформите подписку для использования ИИ-инструментов.',
+          subscriptionKeyboard
+        );
+      }
+      return;
+    }
+
     // Обработка основных команд и кнопок
     if (text === '🤖 ИИ-тренер' || text.includes('ИИ-тренер')) {
       userStates.delete(user.id); // Сбрасываем режим ИИ-тренера
@@ -218,7 +335,7 @@ async function handleTextMessage(bot, msg) {
       return;
     }
     
-    if (text === '📊 Подписка' || text.includes('Подписка')) {
+    if (text === '� Подписка' || text === '�📊 Подписка' || text.includes('Подписка')) {
       userStates.delete(user.id);
       await showSubscriptionMenu(bot, chatId, dbUser.id);
       return;
@@ -319,6 +436,111 @@ async function handleTextMessage(bot, msg) {
       return;
     }
 
+    // Обработка кнопок типов тренировок
+    if (text === '💪 Силовая тренировка' || text.includes('Силовая тренировка')) {
+      userStates.delete(user.id);
+      
+      try {
+        const workoutData = {
+          type: 'Силовая тренировка',
+          date: new Date(),
+          description: `Силовая тренировка - ${new Date().toLocaleDateString('ru-RU')}`
+        };
+        
+        await saveWorkout(dbUser.id, workoutData);
+        
+        await bot.sendMessage(
+          chatId,
+          `💪 **Силовая тренировка добавлена!**\n\n` +
+          `📅 Дата: ${new Date().toLocaleDateString('ru-RU')}\n\n` +
+          `Тренировка сохранена в вашем профиле.`,
+          { parse_mode: 'Markdown', ...mainKeyboard }
+        );
+      } catch (error) {
+        console.error('Ошибка сохранения силовой тренировки:', error);
+        await bot.sendMessage(chatId, '❌ Ошибка при сохранении тренировки.', mainKeyboard);
+      }
+      return;
+    }
+
+    if (text === '🏃‍♂️ Кардио' || text.includes('Кардио')) {
+      userStates.delete(user.id);
+      
+      try {
+        const workoutData = {
+          type: 'Кардио',
+          date: new Date(),
+          description: `Кардио тренировка - ${new Date().toLocaleDateString('ru-RU')}`
+        };
+        
+        await saveWorkout(dbUser.id, workoutData);
+        
+        await bot.sendMessage(
+          chatId,
+          `🏃‍♂️ **Кардио тренировка добавлена!**\n\n` +
+          `📅 Дата: ${new Date().toLocaleDateString('ru-RU')}\n\n` +
+          `Тренировка сохранена в вашем профиле.`,
+          { parse_mode: 'Markdown', ...mainKeyboard }
+        );
+      } catch (error) {
+        console.error('Ошибка сохранения кардио тренировки:', error);
+        await bot.sendMessage(chatId, '❌ Ошибка при сохранении тренировки.', mainKeyboard);
+      }
+      return;
+    }
+
+    if (text === '🧘‍♀️ Йога/Растяжка' || text.includes('Йога')) {
+      userStates.delete(user.id);
+      
+      try {
+        const workoutData = {
+          type: 'Йога/Растяжка',
+          date: new Date(),
+          description: `Йога/Растяжка - ${new Date().toLocaleDateString('ru-RU')}`
+        };
+        
+        await saveWorkout(dbUser.id, workoutData);
+        
+        await bot.sendMessage(
+          chatId,
+          `🧘‍♀️ **Йога/Растяжка добавлена!**\n\n` +
+          `📅 Дата: ${new Date().toLocaleDateString('ru-RU')}\n\n` +
+          `Тренировка сохранена в вашем профиле.`,
+          { parse_mode: 'Markdown', ...mainKeyboard }
+        );
+      } catch (error) {
+        console.error('Ошибка сохранения йога тренировки:', error);
+        await bot.sendMessage(chatId, '❌ Ошибка при сохранении тренировки.', mainKeyboard);
+      }
+      return;
+    }
+
+    if (text === '🥊 Единоборства' || text.includes('Единоборства')) {
+      userStates.delete(user.id);
+      
+      try {
+        const workoutData = {
+          type: 'Единоборства',
+          date: new Date(),
+          description: `Единоборства - ${new Date().toLocaleDateString('ru-RU')}`
+        };
+        
+        await saveWorkout(dbUser.id, workoutData);
+        
+        await bot.sendMessage(
+          chatId,
+          `🥊 **Единоборства добавлены!**\n\n` +
+          `📅 Дата: ${new Date().toLocaleDateString('ru-RU')}\n\n` +
+          `Тренировка сохранена в вашем профиле.`,
+          { parse_mode: 'Markdown', ...mainKeyboard }
+        );
+      } catch (error) {
+        console.error('Ошибка сохранения тренировки единоборств:', error);
+        await bot.sendMessage(chatId, '❌ Ошибка при сохранении тренировки.', mainKeyboard);
+      }
+      return;
+    }
+
     // Обработка кнопок аналитики  
     if (text === '📈 График веса' || text.includes('График веса')) {
       userStates.delete(user.id);
@@ -384,6 +606,322 @@ async function handleTextMessage(bot, msg) {
         console.error('Ошибка генерации отчета:', error);
         await bot.sendMessage(chatId, '❌ Ошибка при генерации отчета. Попробуйте позже.');
       }
+      return;
+    }
+
+    if (text === '🏆 Достижения' || text.includes('Достижения')) {
+      userStates.delete(user.id);
+      
+      try {
+        const achievements = await getUserAchievements(dbUser.id);
+        if (achievements && achievements.length > 0) {
+          let message = '🏆 **Ваши достижения**\n\n';
+          achievements.forEach((achievement, index) => {
+            const date = new Date(achievement.date).toLocaleDateString('ru-RU');
+            message += `${index + 1}. 🏆 ${achievement.title}\n`;
+            if (achievement.description) {
+              message += `   📝 ${achievement.description}\n`;
+            }
+            message += `   📅 ${date}\n\n`;
+          });
+          
+          await bot.sendMessage(chatId, message, { parse_mode: 'Markdown', ...mainKeyboard });
+        } else {
+          await bot.sendMessage(
+            chatId,
+            '🏆 **Достижения**\n\n' +
+            '📝 У вас пока нет достижений.\n\n' +
+            'Достижения появляются автоматически при:\n' +
+            '• Регулярных тренировках\n' +
+            '• Достижении целей по весу\n' +
+            '• Продолжительном использовании бота\n\n' +
+            'Продолжайте тренироваться! 💪',
+            { parse_mode: 'Markdown', ...mainKeyboard }
+          );
+        }
+      } catch (error) {
+        console.error('Ошибка получения достижений:', error);
+        await bot.sendMessage(chatId, '❌ Ошибка при загрузке достижений.', mainKeyboard);
+      }
+      return;
+    }
+
+    // Обработка кнопок целей из goalTypesKeyboard
+    if (text === '🏋️‍♂️ Набрать мышечную массу') {
+      userStates.delete(user.id);
+      
+      try {
+        await setUserGoal(dbUser.id, 'Набрать мышечную массу');
+        
+        await bot.sendMessage(
+          chatId,
+          `🎯 **Цель установлена!**\n\n` +
+          `Ваша цель: Набрать мышечную массу\n\n` +
+          `💡 **Рекомендации:**\n` +
+          `• Силовые тренировки 3-4 раза в неделю\n` +
+          `• Прогрессивная перегрузка\n` +
+          `• Достаточное потребление белка\n` +
+          `• Отдых между тренировками\n\n` +
+          `Отслеживайте прогресс в разделе "📈 Аналитика"`,
+          { parse_mode: 'Markdown', ...mainKeyboard }
+        );
+      } catch (error) {
+        console.error('Ошибка установки цели:', error);
+        await bot.sendMessage(chatId, '❌ Ошибка при установке цели. Попробуйте позже.', mainKeyboard);
+      }
+      return;
+    }
+
+    if (text === '⚖️ Снизить вес') {
+      userStates.delete(user.id);
+      
+      try {
+        await setUserGoal(dbUser.id, 'Снизить вес');
+        
+        await bot.sendMessage(
+          chatId,
+          `🎯 **Цель установлена!**\n\n` +
+          `Ваша цель: Снизить вес\n\n` +
+          `💡 **Рекомендации:**\n` +
+          `• Кардио тренировки 4-5 раз в неделю\n` +
+          `• Дефицит калорий\n` +
+          `• Силовые для сохранения мышц\n` +
+          `• Регулярное взвешивание\n\n` +
+          `Отслеживайте прогресс в разделе "📈 Аналитика"`,
+          { parse_mode: 'Markdown', ...mainKeyboard }
+        );
+      } catch (error) {
+        console.error('Ошибка установки цели:', error);
+        await bot.sendMessage(chatId, '❌ Ошибка при установке цели. Попробуйте позже.', mainKeyboard);
+      }
+      return;
+    }
+
+    if (text === '💪 Увеличить силу') {
+      userStates.delete(user.id);
+      
+      try {
+        await setUserGoal(dbUser.id, 'Увеличить силу');
+        
+        await bot.sendMessage(
+          chatId,
+          `🎯 **Цель установлена!**\n\n` +
+          `Ваша цель: Увеличить силу\n\n` +
+          `💡 **Рекомендации:**\n` +
+          `• Базовые упражнения (приседания, жим, тяга)\n` +
+          `• Работа с тяжелыми весами (3-6 повторений)\n` +
+          `• Достаточный отдых между подходами\n` +
+          `• Прогрессия нагрузки\n\n` +
+          `Отслеживайте прогресс в разделе "📈 Аналитика"`,
+          { parse_mode: 'Markdown', ...mainKeyboard }
+        );
+      } catch (error) {
+        console.error('Ошибка установки цели:', error);
+        await bot.sendMessage(chatId, '❌ Ошибка при установке цели. Попробуйте позже.', mainKeyboard);
+      }
+      return;
+    }
+
+    if (text === '🏃‍♂️ Улучшить выносливость') {
+      userStates.delete(user.id);
+      
+      try {
+        await setUserGoal(dbUser.id, 'Улучшить выносливость');
+        
+        await bot.sendMessage(
+          chatId,
+          `🎯 **Цель установлена!**\n\n` +
+          `Ваша цель: Улучшить выносливость\n\n` +
+          `💡 **Рекомендации:**\n` +
+          `• Кардио тренировки средней интенсивности\n` +
+          `• Интервальные тренировки\n` +
+          `• Постепенное увеличение времени нагрузки\n` +
+          `• Регулярность важнее интенсивности\n\n` +
+          `Отслеживайте прогресс в разделе "📈 Аналитика"`,
+          { parse_mode: 'Markdown', ...mainKeyboard }
+        );
+      } catch (error) {
+        console.error('Ошибка установки цели:', error);
+        await bot.sendMessage(chatId, '❌ Ошибка при установке цели. Попробуйте позже.', mainKeyboard);
+      }
+      return;
+    }
+
+    if (text === '🤸‍♂️ Повысить гибкость') {
+      userStates.delete(user.id);
+      
+      try {
+        await setUserGoal(dbUser.id, 'Повысить гибкость');
+        
+        await bot.sendMessage(
+          chatId,
+          `🎯 **Цель установлена!**\n\n` +
+          `Ваша цель: Повысить гибкость\n\n` +
+          `💡 **Рекомендации:**\n` +
+          `• Ежедневная растяжка (10-15 минут)\n` +
+          `• Йога или пилатес\n` +
+          `• Растяжка после тренировок\n` +
+          `• Постепенное увеличение амплитуды\n\n` +
+          `Отслеживайте прогресс в разделе "📈 Аналитика"`,
+          { parse_mode: 'Markdown', ...mainKeyboard }
+        );
+      } catch (error) {
+        console.error('Ошибка установки цели:', error);
+        await bot.sendMessage(chatId, '❌ Ошибка при установке цели. Попробуйте позже.', mainKeyboard);
+      }
+      return;
+    }
+
+    if (text === '⚡ Общая физподготовка') {
+      userStates.delete(user.id);
+      
+      try {
+        await setUserGoal(dbUser.id, 'Общая физическая подготовка');
+        
+        await bot.sendMessage(
+          chatId,
+          `🎯 **Цель установлена!**\n\n` +
+          `Ваша цель: Общая физическая подготовка\n\n` +
+          `💡 **Рекомендации:**\n` +
+          `• Комбинированные тренировки\n` +
+          `• Разнообразие упражнений\n` +
+          `• Кардио + силовые + растяжка\n` +
+          `• Функциональные движения\n\n` +
+          `Отслеживайте прогресс в разделе "📈 Аналитика"`,
+          { parse_mode: 'Markdown', ...mainKeyboard }
+        );
+      } catch (error) {
+        console.error('Ошибка установки цели:', error);
+        await bot.sendMessage(chatId, '❌ Ошибка при установке цели. Попробуйте позже.', mainKeyboard);
+      }
+      return;
+    }
+
+    // Обработка кнопок подписки
+    if (text === '💳 Оплатить подписку') {
+      userStates.delete(user.id);
+      await bot.sendMessage(
+        chatId,
+        '💎 **Выбор тарифного плана**\n\n' +
+        '**Доступные планы подписки:**\n\n' +
+        '🥉 **Базовый план** - 150₽\n' +
+        '• 100 запросов к ИИ-тренеру в месяц\n' +
+        '• Индивидуальные программы тренировок\n' +
+        '• Планы питания\n\n' +
+        '🥈 **Стандарт план** - 300₽\n' +
+        '• 300 запросов к ИИ-тренеру в месяц\n' +
+        '• Все функции Базового плана\n' +
+        '• Анализ прогресса\n\n' +
+        '🥇 **Премиум план** - 450₽\n' +
+        '• Безлимитные запросы к ИИ-тренеру\n' +
+        '• Все функции предыдущих планов\n' +
+        '• Приоритетная поддержка\n\n' +
+        'Выберите подходящий план:',
+        { parse_mode: 'Markdown', ...subscriptionPlansKeyboard }
+      );
+      return;
+    }
+
+    if (text === '📋 Статус подписки') {
+      userStates.delete(user.id);
+      await showSubscriptionMenu(bot, chatId, dbUser.id);
+      return;
+    }
+
+    if (text === '📊 История платежей') {
+      userStates.delete(user.id);
+      
+      try {
+        const payments = await getUserPayments(dbUser.id);
+        let message = '📊 **История платежей**\n\n';
+        
+        if (payments && payments.length > 0) {
+          payments.forEach((payment, index) => {
+            const date = new Date(payment.created_at).toLocaleDateString('ru-RU');
+            const status = payment.status === 'succeeded' ? '✅' : '❌';
+            message += `${index + 1}. ${status} ${payment.amount}₽ - ${payment.description}\n`;
+            message += `   📅 ${date}\n\n`;
+          });
+        } else {
+          message += '📝 У вас пока нет платежей.\n\n';
+          message += 'Оформите подписку для доступа к премиум функциям!';
+        }
+        
+        await bot.sendMessage(chatId, message, { parse_mode: 'Markdown', ...subscriptionKeyboard });
+      } catch (error) {
+        console.error('Ошибка получения истории платежей:', error);
+        await bot.sendMessage(chatId, '❌ Ошибка при загрузке истории платежей.', subscriptionKeyboard);
+      }
+      return;
+    }
+
+    // Обработка кнопок выбора планов подписки
+    if (text === '💎 Базовый план - 150₽' || text.includes('Базовый план')) {
+      userStates.delete(user.id);
+      await bot.sendMessage(
+        chatId,
+        '💎 **Базовый план - 150₽**\n\n' +
+        '**Что включено:**\n' +
+        '• 100 запросов к ИИ-тренеру в месяц\n' +
+        '• Персональные программы тренировок\n' +
+        '• Индивидуальные планы питания\n' +
+        '• Отслеживание прогресса\n\n' +
+        '💳 **Стоимость:** 150₽ за 30 дней\n\n' +
+        'Подтвердите оплату для активации подписки:',
+        { parse_mode: 'Markdown', ...paymentConfirmKeyboard }
+      );
+      return;
+    }
+
+    if (text === '⭐ Стандартный план - 300₽' || text.includes('Стандартный план')) {
+      userStates.delete(user.id);
+      await bot.sendMessage(
+        chatId,
+        '⭐ **Стандартный план - 300₽**\n\n' +
+        '**Что включено:**\n' +
+        '• 300 запросов к ИИ-тренеру в месяц\n' +
+        '• Все функции Базового плана\n' +
+        '• Расширенная аналитика прогресса\n' +
+        '• Рекомендации по восстановлению\n\n' +
+        '💳 **Стоимость:** 300₽ за 30 дней\n\n' +
+        'Подтвердите оплату для активации подписки:',
+        { parse_mode: 'Markdown', ...paymentConfirmKeyboard }
+      );
+      return;
+    }
+
+    if (text === '🚀 Премиум план - 450₽' || text.includes('Премиум план')) {
+      userStates.delete(user.id);
+      await bot.sendMessage(
+        chatId,
+        '🚀 **Премиум план - 450₽**\n\n' +
+        '**Что включено:**\n' +
+        '• Безлимитные запросы к ИИ-тренеру\n' +
+        '• Все функции предыдущих планов\n' +
+        '• Приоритетная поддержка\n' +
+        '• Эксклюзивные программы тренировок\n' +
+        '• Персональные консультации\n\n' +
+        '💳 **Стоимость:** 450₽ за 30 дней\n\n' +
+        'Подтвердите оплату для активации подписки:',
+        { parse_mode: 'Markdown', ...paymentConfirmKeyboard }
+      );
+      return;
+    }
+
+    if (text === '⬅️ Назад к подписке' || text.includes('Назад к подписке')) {
+      userStates.delete(user.id);
+      await showSubscriptionMenu(bot, chatId, dbUser.id);
+      return;
+    }
+
+    if (text === '⬅️ Назад к планам' || text.includes('Назад к планам')) {
+      userStates.delete(user.id);
+      await bot.sendMessage(
+        chatId,
+        '💎 **Выбор тарифного плана**\n\n' +
+        'Выберите подходящий план:',
+        { parse_mode: 'Markdown', ...subscriptionPlansKeyboard }
+      );
       return;
     }
 
