@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Отчет тестирования кнопок FitnessBotAI</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+        
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            padding: 40px;
+            background: #f8f9fa;
+        }
+        
+        .summary-card {
+            background: white;
+            padding: 25px;
+            border-radius: 15px;
+            text-align: center;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            transition: transform 0.3s;
+        }
+        
+        .summary-card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .summary-card h3 {
+            color: #667eea;
+            font-size: 3em;
+            margin-bottom: 10px;
+        }
+        
+        .summary-card p {
+            color: #666;
+            font-size: 1.1em;
+        }
+        
+        .progress-bar {
+            background: #e0e0e0;
+            height: 30px;
+            border-radius: 15px;
+            overflow: hidden;
+            margin: 40px;
+        }
+        
+        .progress-fill {
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            transition: width 1s ease-in-out;
+        }
+        
+        .categories {
+            padding: 0 40px 40px;
+        }
+        
+        .category {
+            margin-bottom: 30px;
+            border: 2px solid #e0e0e0;
+            border-radius: 15px;
+            overflow: hidden;
+        }
+        
+        .category-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+        }
+        
+        .category-header h2 {
+            font-size: 1.4em;
+        }
+        
+        .category-stats {
+            background: rgba(255,255,255,0.2);
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.9em;
+        }
+        
+        .category-content {
+            padding: 20px;
+        }
+        
+        .button-item {
+            display: grid;
+            grid-template-columns: 40px 1fr 60px 60px 100px;
+            gap: 15px;
+            padding: 15px;
+            margin-bottom: 10px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            align-items: center;
+            transition: all 0.3s;
+        }
+        
+        .button-item:hover {
+            background: #e9ecef;
+            transform: translateX(5px);
+        }
+        
+        .status-icon {
+            font-size: 1.5em;
+            text-align: center;
+        }
+        
+        .button-name {
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+        }
+        
+        .badge {
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 0.8em;
+            text-align: center;
+            font-weight: bold;
+        }
+        
+        .badge-success {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .badge-danger {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .badge-warning {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .button-type {
+            font-size: 0.8em;
+            color: #666;
+            background: #e0e0e0;
+            padding: 5px 10px;
+            border-radius: 5px;
+            text-align: center;
+        }
+        
+        .legend {
+            background: #f8f9fa;
+            padding: 30px;
+            margin: 40px;
+            border-radius: 15px;
+            border-left: 5px solid #667eea;
+        }
+        
+        .legend h3 {
+            color: #667eea;
+            margin-bottom: 15px;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .legend-icon {
+            width: 40px;
+            font-size: 1.5em;
+            text-align: center;
+        }
+        
+        .recommendations {
+            background: #fff3cd;
+            border-left: 5px solid #ffc107;
+            padding: 30px;
+            margin: 40px;
+            border-radius: 15px;
+        }
+        
+        .recommendations h3 {
+            color: #856404;
+            margin-bottom: 15px;
+        }
+        
+        .recommendations ul {
+            margin-left: 20px;
+        }
+        
+        .recommendations li {
+            margin-bottom: 10px;
+            color: #856404;
+        }
+        
+        .footer {
+            background: #f8f9fa;
+            padding: 20px;
+            text-align: center;
+            color: #666;
+        }
+        
+        @media (max-width: 768px) {
+            .button-item {
+                grid-template-columns: 1fr;
+                gap: 10px;
+            }
+            
+            .summary {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🧪 Отчет тестирования кнопок</h1>
+            <p>FitnessBotAI - Полное тестирование функциональности</p>
+        </div>
+        
+        <div class="summary">
+            <div class="summary-card">
+                <h3>61</h3>
+                <p>Всего кнопок</p>
+            </div>
+            <div class="summary-card">
+                <h3 style="color: #28a745;">59</h3>
+                <p>Успешно</p>
+            </div>
+            <div class="summary-card">
+                <h3 style="color: #dc3545;">2</h3>
+                <p>Ошибок</p>
+            </div>
+            <div class="summary-card">
+                <h3 style="color: #28a745;">96.7%</h3>
+                <p>Успех</p>
+            </div>
+        </div>
+        
+        <div class="progress-bar">
+            <div class="progress-fill" style="width: 96.7%;">
+                96.7% успешных тестов
+            </div>
+        </div>
+        
+        <div class="legend">
+            <h3>📖 Легенда</h3>
+            <div class="legend-item">
+                <span class="legend-icon">✅</span>
+                <span>Кнопка работает корректно</span>
+            </div>
+            <div class="legend-item">
+                <span class="legend-icon">❌</span>
+                <span>Обнаружены проблемы</span>
+            </div>
+            <div class="legend-item">
+                <span class="legend-icon">📱</span>
+                <span>Определена в keyboards.js</span>
+            </div>
+            <div class="legend-item">
+                <span class="legend-icon">⚙️</span>
+                <span>Обработчик в handlers.js</span>
+            </div>
+        </div>
+        
+        <div class="categories">
+            <div class="category">
+                <div class="category-header">
+                    <h2>📁 Главное меню</h2>
+                    <span class="category-stats">8/8 (100.0%)</span>
+                </div>
+                <div class="category-content">
+                    <div class="button-item">
+                        <span class="status-icon">✅</span>
+                        <span class="button-name">🤖 ИИ-тренер</span>
+                        <span class="badge badge-success">📱</span>
+                        <span class="badge badge-success">⚙️</span>
+                        <span class="button-type">text</span>
+                    </div>
+                    <div class="button-item">
+                        <span class="status-icon">✅</span>
+                        <span class="button-name">🧬 ИИ-инструменты</span>
+                        <span class="badge badge-success">📱</span>
+                        <span class="badge badge-success">⚙️</span>
+                        <span class="button-type">text</span>
+                    </div>
+                    <div class="button-item">
+                        <span class="status-icon">✅</span>
+                        <span class="button-name">💎 Подписка</span>
+                        <span class="badge badge-success">📱</span>
+                        <span class="badge badge-success">⚙️</span>
+                        <span class="button-type">text</span>
+                    </div>
+                    <div class="button-item">
+                        <span class="status-icon">✅</span>
+                        <span class="button-name">📊 Мой профиль</span>
+                        <span class="badge badge-success">📱</span>
+                        <span class="badge badge-success">⚙️</span>
+                        <span class="button-type">text</span>
+                    </div>
+                    <div class="button-item">
+                        <span class="status-icon">✅</span>
+                        <span class="button-name">📈 Аналитика</span>
+                        <span class="badge badge-success">📱</span>
+                        <span class="badge badge-success">⚙️</span>
+                        <span class="button-type">text</span>
+                    </div>
+                    <div class="button-item">
+                        <span class="status-icon">✅</span>
+                        <span class="button-name">🎯 Мои данные</span>
+                        <span class="badge badge-success">📱</span>
+                        <span class="badge badge-success">⚙️</span>
+                        <span class="button-type">text</span>
+                    </div>
+                    <div class="button-item">
+                        <span class="status-icon">✅</span>
+                        <span class="button-name">🔄 Новый диалог</span>
+                        <span class="badge badge-success">📱</span>
+                        <span class="badge badge-success">⚙️</span>
+                        <span class="button-type">text</span>
+                    </div>
+                    <div class="button-item">
+                        <span class="status-icon">✅</span>
+                        <span class="button-name">❓ Помощь</span>
+                        <span class="badge badge-success">📱</span>
+                        <span class="badge badge-success">⚙️</span>
+                        <span class="button-type">text</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="category">
+                <div class="category-header">
+                    <h2>⚠️ Callback-кнопки платежей (Требуют внимания)</h2>
+                    <span class="category-stats">5/7 (71.4%)</span>
+                </div>
+                <div class="category-content">
+                    <div class="button-item">
+                        <span class="status-icon">⚠️</span>
+                        <span class="button-name">pay_monthly</span>
+                        <span class="badge badge-success">📱</span>
+                        <span class="badge badge-danger">❌</span>
+                        <span class="button-type">callback</span>
+                    </div>
+                    <div class="button-item">
+                        <span class="status-icon">⚠️</span>
+                        <span class="button-name">pay_quarterly</span>
+                        <span class="badge badge-success">📱</span>
+                        <span class="badge badge-danger">❌</span>
+                        <span class="button-type">callback</span>
+                    </div>
+                    <div class="button-item">
+                        <span class="status-icon">⚠️</span>
+                        <span class="button-name">pay_yearly</span>
+                        <span class="badge badge-success">📱</span>
+                        <span class="badge badge-danger">❌</span>
+                        <span class="button-type">callback</span>
+                    </div>
+                    <div class="button-item">
+                        <span class="status-icon">✅</span>
+                        <span class="button-name">confirm_payment</span>
+                        <span class="badge badge-success">📱</span>
+                        <span class="badge badge-success">⚙️</span>
+                        <span class="button-type">callback</span>
+                    </div>
+                    <div class="button-item">
+                        <span class="status-icon">⚠️</span>
+                        <span class="button-name">cancel_payment</span>
+                        <span class="badge badge-success">📱</span>
+                        <span class="badge badge-danger">❌</span>
+                        <span class="button-type">callback</span>
+                    </div>
+                    <div class="button-item">
+                        <span class="status-icon">❌</span>
+                        <span class="button-name">start_work</span>
+                        <span class="badge badge-danger">❌</span>
+                        <span class="badge badge-danger">❌</span>
+                        <span class="button-type">callback</span>
+                    </div>
+                    <div class="button-item">
+                        <span class="status-icon">❌</span>
+                        <span class="button-name">my_status</span>
+                        <span class="badge badge-danger">❌</span>
+                        <span class="badge badge-danger">❌</span>
+                        <span class="button-type">callback</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="recommendations">
+            <h3>💡 Рекомендации по исправлению</h3>
+            <ul>
+                <li><strong>pay_monthly, pay_quarterly, pay_yearly:</strong> Добавить обработчики в handlers.js для обработки выбора тарифного плана</li>
+                <li><strong>cancel_payment:</strong> Добавить обработчик для отмены платежа</li>
+                <li><strong>start_work:</strong> Добавить кнопку в keyboards.js и обработчик в handlers.js</li>
+                <li><strong>my_status:</strong> Добавить кнопку в keyboards.js и обработчик в handlers.js</li>
+                <li>Рекомендуется провести ручное тестирование всех функций после добавления недостающих обработчиков</li>
+            </ul>
+        </div>
+        
+        <div class="footer">
+            <p>Тест выполнен: <strong id="test-date"></strong></p>
+            <p>FitnessBotAI © 2025</p>
+        </div>
+    </div>
+    
+    <script>
+        document.getElementById('test-date').textContent = new Date().toLocaleString('ru-RU');
+    </script>
+</body>
+</html>

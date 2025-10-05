@@ -1558,6 +1558,114 @@ async function handleCallbackQuery(bot, callbackQuery) {
       await processPayment(bot, chatId, messageId, userId, planType);
       return;
     }
+    // Обработка callback после оплаты - начать работу
+    if (data === 'start_work') {
+      try {
+        await bot.deleteMessage(chatId, messageId).catch(() => {});
+        await bot.sendMessage(
+          chatId,
+          '🎉 **Добро пожаловать!**\n\n' +
+          'Теперь вам доступны все функции бота. Выберите действие:',
+          { parse_mode: 'Markdown', ...mainKeyboard }
+        );
+        return;
+      } catch (error) {
+        console.error('Error in start_work handler:', error);
+      }
+    }
+
+    // Обработка callback - показать статус подписки
+    if (data === 'my_status') {
+      try {
+        const dbUser = await getUserByTelegramId(userId);
+        const subscription = await getActiveSubscription(dbUser.id);
+        
+        let statusMessage = '📊 **Статус подписки**\n\n';
+        
+        if (subscription && subscription.status === 'active') {
+          const endDate = new Date(subscription.end_date).toLocaleString('ru-RU');
+          statusMessage += `✅ **Активная подписка**\n`;
+          statusMessage += `📋 План: ${subscription.plan_type}\n`;
+          statusMessage += `📅 Действует до: ${endDate}\n`;
+          statusMessage += `🔄 Запросов использовано: ${subscription.requests_used}/${subscription.requests_limit}\n`;
+        } else {
+          const freeRequests = await getUserFreeRequests(dbUser.id);
+          statusMessage += `❌ Нет активной подписки\n\n`;
+          statusMessage += `🆓 Бесплатные запросы: ${freeRequests.used}/${freeRequests.limit}\n\n`;
+          statusMessage += `Для оформления подписки используйте кнопку "💎 Подписка"`;
+        }
+        
+        await bot.editMessageText(statusMessage, {
+          chat_id: chatId,
+          message_id: messageId,
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🏠 Главное меню', callback_data: 'main_menu' }]
+            ]
+          }
+        });
+        return;
+      } catch (error) {
+        console.error('Error in my_status handler:', error);
+      }
+    }
+
+    // Обработка выбора месячного тарифа
+    if (data === 'pay_monthly') {
+      try {
+        await processPayment(bot, chatId, messageId, userId, 'monthly');
+        return;
+      } catch (error) {
+        console.error('Error in pay_monthly handler:', error);
+      }
+    }
+
+    // Обработка выбора квартального тарифа
+    if (data === 'pay_quarterly') {
+      try {
+        await processPayment(bot, chatId, messageId, userId, 'quarterly');
+        return;
+      } catch (error) {
+        console.error('Error in pay_quarterly handler:', error);
+      }
+    }
+
+    // Обработка выбора годового тарифа
+    if (data === 'pay_yearly') {
+      try {
+        await processPayment(bot, chatId, messageId, userId, 'yearly');
+        return;
+      } catch (error) {
+        console.error('Error in pay_yearly handler:', error);
+      }
+    }
+
+    // Обработка отмены платежа
+    if (data === 'cancel_payment') {
+      try {
+        await bot.editMessageText(
+          '❌ **Оплата отменена**\n\n' +
+          'Вы можете вернуться к выбору плана подписки позже.',
+          {
+            chat_id: chatId,
+            message_id: messageId,
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '💎 Выбрать план', callback_data: 'subscription_menu' }],
+                [{ text: '🏠 Главное меню', callback_data: 'main_menu' }]
+              ]
+            }
+          }
+        );
+        return;
+      } catch (error) {
+        console.error('Error in cancel_payment handler:', error);
+      }
+    }
+
+
 
     // Другие callback'ы
     await bot.sendMessage(chatId, 'Функция в разработке. Используйте основные кнопки меню.');

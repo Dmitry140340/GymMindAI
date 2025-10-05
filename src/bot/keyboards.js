@@ -334,3 +334,21 @@ export const viewRecordsKeyboard = {
     one_time_keyboard: false
   }
 };
+
+// Клавиатура после успешной оплаты
+export const paymentSuccessKeyboard = {
+  reply_markup: {
+    inline_keyboard: [
+      [
+        { text: '🎉 Начать работу', callback_data: 'start_work' }
+      ],
+      [
+        { text: '📊 Мой статус', callback_data: 'my_status' }
+      ],
+      [
+        { text: '🏠 Главное меню', callback_data: 'main_menu' }
+      ]
+    ]
+  }
+};
+
