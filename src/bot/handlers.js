@@ -335,7 +335,7 @@ async function handleTextMessage(bot, msg) {
       return;
     }
     
-    if (text === '� Подписка' || text === '�📊 Подписка' || text.includes('Подписка')) {
+    if (text === '💎 Подписка' || text.includes('Подписка')) {
       userStates.delete(user.id);
       await showSubscriptionMenu(bot, chatId, dbUser.id);
       return;

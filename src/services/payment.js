@@ -326,6 +326,52 @@ export async function createSubscriptionPayment(telegramUserOrId, planType, amou
   }
 }
 
+/**
+ * Проверяет подпись webhook от YooKassa
+ * @param {string} signature - Подпись из заголовка X-YooKassa-Signature
+ * @param {object} body - Тело webhook запроса
+ * @returns {boolean} - true если подпись валидна
+ */
+export function verifyPaymentSignature(signature, body) {
+  try {
+    const secretKey = process.env.YOOKASSA_SECRET_KEY;
+    
+    if (!secretKey) {
+      console.warn('⚠️ YOOKASSA_SECRET_KEY не найден, пропускаем проверку подписи');
+      return true; // В тестовом режиме можем пропускать
+    }
+    
+    if (!signature) {
+      console.warn('⚠️ Подпись отсутствует в запросе');
+      return false;
+    }
+    
+    // Преобразуем body в JSON строку
+    const bodyString = typeof body === 'string' ? body : JSON.stringify(body);
+    
+    // Вычисляем ожидаемую подпись
+    const expectedSignature = crypto
+      .createHmac('sha256', secretKey)
+      .update(bodyString)
+      .digest('hex');
+    
+    const isValid = signature === expectedSignature;
+    
+    if (!isValid) {
+      console.error('❌ Недействительная подпись webhook!');
+      console.error('Получена подпись:', signature);
+      console.error('Ожидаемая подпись:', expectedSignature);
+    } else {
+      console.log('✅ Подпись webhook проверена успешно');
+    }
+    
+    return isValid;
+  } catch (error) {
+    console.error('❌ Ошибка проверки подписи:', error);
+    return false;
+  }
+}
+
 console.log('About to call initializePaymentMode...');
 initializePaymentMode();
 console.log('Payment module with init function loaded');
