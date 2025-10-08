@@ -93,19 +93,21 @@ async function runSimpleWorkflow(workflowId, parameters) {
         return {
           success: true,
           data: parsedData,
-          message: output
+          response: output  // Изменено с message на response для единообразия
         };
       } else {
         console.log('❌ Не найден output в данных:', Object.keys(parsedData));
         return {
           success: false,
-          error: 'Нет данных в ответе workflow'
+          error: 'Нет данных в ответе workflow',
+          response: null
         };
       }
     } else {
       return {
         success: false,
-        error: response.data?.msg || 'Неизвестная ошибка workflow'
+        error: response.data?.msg || 'Неизвестная ошибка workflow',
+        response: null
       };
     }
 

@@ -73,6 +73,42 @@ const userWorkflowContext = new Map();
 const userInteractiveWorkflow = new Map();
 const activeWorkouts = new Map();
 
+// Вспомогательная функция для отправки длинных сообщений
+async function sendLongMessage(bot, chatId, message, keyboard = null) {
+  const maxLength = 4096;
+  
+  if (message.length <= maxLength) {
+    const options = { parse_mode: 'Markdown' };
+    if (keyboard) {
+      Object.assign(options, keyboard);
+    }
+    await bot.sendMessage(chatId, message, options);
+  } else {
+    const parts = [];
+    let currentPart = '';
+    const lines = message.split('\n');
+    
+    for (const line of lines) {
+      if ((currentPart + line + '\n').length > maxLength) {
+        if (currentPart) parts.push(currentPart);
+        currentPart = line + '\n';
+      } else {
+        currentPart += line + '\n';
+      }
+    }
+    if (currentPart) parts.push(currentPart);
+    
+    for (let i = 0; i < parts.length; i++) {
+      const isLast = i === parts.length - 1;
+      const options = { parse_mode: 'Markdown' };
+      if (isLast && keyboard) {
+        Object.assign(options, keyboard);
+      }
+      await bot.sendMessage(chatId, parts[i], options);
+    }
+  }
+}
+
 export function setupBotHandlers(bot) {
   // Команда /start с возможным параметром
   bot.onText(/\/start(?:\s+(.+))?/, async (msg, match) => {
@@ -123,7 +159,7 @@ export function setupBotHandlers(bot) {
 
   // Обработка текстовых сообщений
   bot.on('message', async (msg) => {
-    if (msg.text && !msg.text.startsWith('/')) {
+    if (msg.text) {
       await handleTextMessage(bot, msg);
     }
   });
@@ -149,6 +185,7 @@ async function handleTextMessage(bot, msg) {
   const user = msg.from;
 
   console.log(`📩 Получено сообщение от пользователя ${user.id}:`, text);
+  console.log(`🔍 Тип сообщения:`, msg.entities ? msg.entities[0]?.type : 'обычный текст');
 
   try {
     // Обновляем активность пользователя
@@ -166,8 +203,9 @@ async function handleTextMessage(bot, msg) {
     }
 
     // Обработка AI команд
+    console.log(`🤖 Проверка AI команды: "${text}"`);
     if (text === '/training_program' || text.startsWith('/training_program')) {
-      userStates.delete(user.id);
+      console.log('✅ Обнаружена команда /training_program');
       
       // Проверяем доступ пользователя
       const subscription = await getActiveSubscription(dbUser.id);
@@ -184,30 +222,89 @@ async function handleTextMessage(bot, msg) {
         await bot.sendMessage(
           chatId,
           '🏋️‍♂️ **Создание программы тренировок**\n\n' +
-          '⏳ Анализирую ваши данные и создаю персональную программу...',
+          '⏳ Запускаю интерактивный AI-помощник для создания вашей персональной программы тренировок...',
           { parse_mode: 'Markdown' }
         );
         
         try {
-          const result = await runWorkflow(dbUser.id, 'training_program');
-          await bot.sendMessage(chatId, result.response, { parse_mode: 'Markdown', ...mainKeyboard });
+          // Получаем ID воркфлоу из переменной окружения
+          const workflowId = process.env.COZE_TRAINING_PROGRAM_WORKFLOW_ID;
+          
+          if (!workflowId) {
+            await bot.sendMessage(
+              chatId,
+              '❌ **Workflow не настроен**\n\n' +
+              'AI-инструмент программы тренировок не настроен в системе.\n' +
+              'Обратитесь к администратору.',
+              { parse_mode: 'Markdown', ...mainKeyboard }
+            );
+            return;
+          }
+          
+          // Запускаем интерактивный воркфлоу
+          const result = await runWorkflow(workflowId, {});
+          
+          // Проверяем, что получен ответ
+          if (!result || !result.message || result.message.trim() === '') {
+            await bot.sendMessage(
+              chatId, 
+              '❌ **Ошибка создания программы тренировок**\n\n' +
+              'AI-воркфлоу не смог сгенерировать ответ.\n' +
+              'Попробуйте позже или обратитесь в поддержку.',
+              { parse_mode: 'Markdown', ...mainKeyboard }
+            );
+            return;
+          }
+          
+          // Проверяем, является ли это интерактивным воркфлоу с вопросами
+          if (result.isInteractive && result.eventId) {
+            // Сохраняем состояние для продолжения диалога
+            userStates.set(user.id, {
+              mode: 'interactive_training_program',
+              eventId: result.eventId,
+              workflowType: 'training_program'
+            });
+            
+            // Отправляем анкету пользователю
+            await bot.sendMessage(
+              chatId,
+              result.message,
+              { parse_mode: 'Markdown', reply_markup: { force_reply: true } }
+            );
+          } else {
+            // Если воркфлоу сразу вернул результат (без вопросов)
+            // Используем бесплатный запрос если нет подписки
+            if (!subscription || subscription.status !== 'active') {
+              await useFreeRequest(dbUser.id);
+            } else {
+              await incrementRequestUsage(dbUser.id);
+            }
+            
+            await bot.sendMessage(chatId, result.message, { parse_mode: 'Markdown', ...mainKeyboard });
+          }
         } catch (error) {
           console.error('Ошибка создания программы тренировок:', error);
-          await bot.sendMessage(chatId, '❌ Ошибка при создании программы тренировок.', mainKeyboard);
+          await bot.sendMessage(
+            chatId, 
+            '❌ **Техническая ошибка**\n\n' +
+            'Не удалось создать программу тренировок.\n' +
+            'Попробуйте позже.',
+            { parse_mode: 'Markdown', ...mainKeyboard }
+          );
         }
       } else {
         await bot.sendMessage(
           chatId,
-          '🔒 Доступ ограничен. Оформите подписку для использования ИИ-инструментов.',
-          subscriptionKeyboard
+          `🔒 **Доступ ограничен**\n\n` +
+          `❌ У вас закончились бесплатные запросы (${freeRequests.used}/${freeRequests.limit})\n\n` +
+          `Оформите подписку для продолжения использования ИИ-инструментов:`,
+          { parse_mode: 'Markdown', ...subscriptionPlansKeyboard }
         );
       }
       return;
     }
 
     if (text === '/nutrition_plan' || text.startsWith('/nutrition_plan')) {
-      userStates.delete(user.id);
-      
       const subscription = await getActiveSubscription(dbUser.id);
       const freeRequests = await getUserFreeRequests(dbUser.id);
       
@@ -222,22 +319,83 @@ async function handleTextMessage(bot, msg) {
         await bot.sendMessage(
           chatId,
           '🥗 **Создание плана питания**\n\n' +
-          '⏳ Анализирую ваши цели и создаю персональный план питания...',
+          '⏳ Запускаю интерактивный AI-помощник для создания вашего персонального плана питания...',
           { parse_mode: 'Markdown' }
         );
         
         try {
-          const result = await runWorkflow(dbUser.id, 'nutrition_plan');
-          await bot.sendMessage(chatId, result.response, { parse_mode: 'Markdown', ...mainKeyboard });
+          // Получаем ID воркфлоу из переменной окружения
+          const workflowId = process.env.COZE_NUTRITION_PLAN_WORKFLOW_ID;
+          
+          if (!workflowId) {
+            await bot.sendMessage(
+              chatId,
+              '❌ **Workflow не настроен**\n\n' +
+              'AI-инструмент плана питания не настроен в системе.\n' +
+              'Обратитесь к администратору.',
+              { parse_mode: 'Markdown', ...mainKeyboard }
+            );
+            return;
+          }
+          
+          // Запускаем интерактивный воркфлоу
+          const result = await runWorkflow(workflowId, {});
+          
+          // Проверяем, что получен ответ
+          if (!result || !result.message || result.message.trim() === '') {
+            await bot.sendMessage(
+              chatId,
+              '❌ **Ошибка создания плана питания**\n\n' +
+              'AI-воркфлоу не смог сгенерировать ответ.\n' +
+              'Попробуйте позже или обратитесь в поддержку.',
+              { parse_mode: 'Markdown', ...mainKeyboard }
+            );
+            return;
+          }
+          
+          // Проверяем, является ли это интерактивным воркфлоу с вопросами
+          if (result.isInteractive && result.eventId) {
+            // Сохраняем состояние для продолжения диалога
+            userStates.set(user.id, {
+              mode: 'interactive_nutrition_plan',
+              eventId: result.eventId,
+              workflowType: 'nutrition_plan'
+            });
+            
+            // Отправляем анкету пользователю
+            await bot.sendMessage(
+              chatId,
+              result.message,
+              { parse_mode: 'Markdown', reply_markup: { force_reply: true } }
+            );
+          } else {
+            // Если воркфлоу сразу вернул результат (без вопросов)
+            // Используем бесплатный запрос если нет подписки
+            if (!subscription || subscription.status !== 'active') {
+              await useFreeRequest(dbUser.id);
+            } else {
+              await incrementRequestUsage(dbUser.id);
+            }
+            
+            await bot.sendMessage(chatId, result.message, { parse_mode: 'Markdown', ...mainKeyboard });
+          }
         } catch (error) {
           console.error('Ошибка создания плана питания:', error);
-          await bot.sendMessage(chatId, '❌ Ошибка при создании плана питания.', mainKeyboard);
+          await bot.sendMessage(
+            chatId,
+            '❌ **Техническая ошибка**\n\n' +
+            'Не удалось создать план питания.\n' +
+            'Попробуйте позже.',
+            { parse_mode: 'Markdown', ...mainKeyboard }
+          );
         }
       } else {
         await bot.sendMessage(
           chatId,
-          '🔒 Доступ ограничен. Оформите подписку для использования ИИ-инструментов.',
-          subscriptionKeyboard
+          `🔒 **Доступ ограничен**\n\n` +
+          `❌ У вас закончились бесплатные запросы (${freeRequests.used}/${freeRequests.limit})\n\n` +
+          `Оформите подписку для продолжения использования ИИ-инструментов:`,
+          { parse_mode: 'Markdown', ...subscriptionPlansKeyboard }
         );
       }
       return;
@@ -274,8 +432,87 @@ async function handleTextMessage(bot, msg) {
       } else {
         await bot.sendMessage(
           chatId,
-          '🔒 Доступ ограничен. Оформите подписку для использования ИИ-инструментов.',
-          subscriptionKeyboard
+          `🔒 **Доступ ограничен**\n\n` +
+          `❌ У вас закончились бесплатные запросы (${freeRequests.used}/${freeRequests.limit})\n\n` +
+          `Оформите подписку для продолжения использования ИИ-инструментов:`,
+          { parse_mode: 'Markdown', ...subscriptionPlansKeyboard }
+        );
+      }
+      return;
+    }
+
+    if (text === '/deepresearch' || text.startsWith('/deepresearch')) {
+      const subscription = await getActiveSubscription(dbUser.id);
+      const freeRequests = await getUserFreeRequests(dbUser.id);
+      
+      let hasAccess = false;
+      if (subscription && subscription.status === 'active') {
+        hasAccess = true;
+      } else if (freeRequests.remaining > 0) {
+        hasAccess = true;
+      }
+      
+      if (hasAccess) {
+        // Устанавливаем состояние ожидания ввода темы исследования
+        userStates.set(user.id, { mode: 'awaiting_deepresearch_query' });
+        
+        await bot.sendMessage(
+          chatId,
+          '🔬 **Глубокое исследование**\n\n' +
+          '📝 Введите тему или вопрос для глубокого исследования.\n\n' +
+          '**Примеры:**\n' +
+          '• Как креатин влияет на набор мышечной массы?\n' +
+          '• Эффективность высокоинтенсивных интервальных тренировок\n' +
+          '• Влияние прерывистого голодания на метаболизм\n\n' +
+          '💬 Отправьте ваш вопрос:',
+          { parse_mode: 'Markdown', reply_markup: { force_reply: true } }
+        );
+      } else {
+        await bot.sendMessage(
+          chatId,
+          `🔒 **Доступ ограничен**\n\n` +
+          `❌ У вас закончились бесплатные запросы (${freeRequests.used}/${freeRequests.limit})\n\n` +
+          `Оформите подписку для продолжения использования ИИ-инструментов:`,
+          { parse_mode: 'Markdown', ...subscriptionPlansKeyboard }
+        );
+      }
+      return;
+    }
+
+    if (text === '/composition_analysis' || text.startsWith('/composition_analysis')) {
+      const subscription = await getActiveSubscription(dbUser.id);
+      const freeRequests = await getUserFreeRequests(dbUser.id);
+      
+      let hasAccess = false;
+      if (subscription && subscription.status === 'active') {
+        hasAccess = true;
+      } else if (freeRequests.remaining > 0) {
+        hasAccess = true;
+      }
+      
+      if (hasAccess) {
+        // Устанавливаем состояние ожидания ввода названия добавки
+        userStates.set(user.id, { mode: 'awaiting_composition_query' });
+        
+        await bot.sendMessage(
+          chatId,
+          '🧪 **Анализ состава добавок**\n\n' +
+          '📝 Введите название добавки или продукта для анализа.\n\n' +
+          '**Примеры:**\n' +
+          '• Креатин моногидрат\n' +
+          '• BCAA\n' +
+          '• Протеиновый коктейль\n' +
+          '• Omega-3\n\n' +
+          '💬 Отправьте название:',
+          { parse_mode: 'Markdown', reply_markup: { force_reply: true } }
+        );
+      } else {
+        await bot.sendMessage(
+          chatId,
+          `🔒 **Доступ ограничен**\n\n` +
+          `❌ У вас закончились бесплатные запросы (${freeRequests.used}/${freeRequests.limit})\n\n` +
+          `Оформите подписку для продолжения использования ИИ-инструментов:`,
+          { parse_mode: 'Markdown', ...subscriptionPlansKeyboard }
         );
       }
       return;
@@ -328,7 +565,7 @@ async function handleTextMessage(bot, msg) {
           '**Доступные планы:**\n' +
           '• 🥉 Базовый (150₽) - 30 дней, 100 запросов\n' +
           '• 🥈 Стандарт (300₽) - 30 дней, 300 запросов\n' +
-          '• 🥇 Премиум (450₽) - 30 дней, безлимит',
+          '• 🥇 Премиум (450₽) - 30 дней, 600 запросов',
           { parse_mode: 'Markdown', ...subscriptionKeyboard }
         );
       }
@@ -813,7 +1050,7 @@ async function handleTextMessage(bot, msg) {
         '• Все функции Базового плана\n' +
         '• Анализ прогресса\n\n' +
         '🥇 **Премиум план** - 450₽\n' +
-        '• Безлимитные запросы к ИИ-тренеру\n' +
+        '• 600 запросов к ИИ-тренеру в месяц\n' +
         '• Все функции предыдущих планов\n' +
         '• Приоритетная поддержка\n\n' +
         'Выберите подходящий план:',
@@ -857,7 +1094,9 @@ async function handleTextMessage(bot, msg) {
 
     // Обработка кнопок выбора планов подписки
     if (text === '💎 Базовый план - 150₽' || text.includes('Базовый план')) {
-      userStates.delete(user.id);
+      // Сохраняем выбранный план в состоянии
+      userStates.set(user.id, { mode: 'payment_confirm', planType: 'basic' });
+      
       await bot.sendMessage(
         chatId,
         '💎 **Базовый план - 150₽**\n\n' +
@@ -874,7 +1113,9 @@ async function handleTextMessage(bot, msg) {
     }
 
     if (text === '⭐ Стандартный план - 300₽' || text.includes('Стандартный план')) {
-      userStates.delete(user.id);
+      // Сохраняем выбранный план в состоянии
+      userStates.set(user.id, { mode: 'payment_confirm', planType: 'standard' });
+      
       await bot.sendMessage(
         chatId,
         '⭐ **Стандартный план - 300₽**\n\n' +
@@ -891,12 +1132,14 @@ async function handleTextMessage(bot, msg) {
     }
 
     if (text === '🚀 Премиум план - 450₽' || text.includes('Премиум план')) {
-      userStates.delete(user.id);
+      // Сохраняем выбранный план в состоянии
+      userStates.set(user.id, { mode: 'payment_confirm', planType: 'premium' });
+      
       await bot.sendMessage(
         chatId,
         '🚀 **Премиум план - 450₽**\n\n' +
         '**Что включено:**\n' +
-        '• Безлимитные запросы к ИИ-тренеру\n' +
+        '• 600 запросов к ИИ-тренеру в месяц\n' +
         '• Все функции предыдущих планов\n' +
         '• Приоритетная поддержка\n' +
         '• Эксклюзивные программы тренировок\n' +
@@ -905,6 +1148,67 @@ async function handleTextMessage(bot, msg) {
         'Подтвердите оплату для активации подписки:',
         { parse_mode: 'Markdown', ...paymentConfirmKeyboard }
       );
+      return;
+    }
+    
+    // Обработка кнопки "Оплатить сейчас"
+    if (text === '💳 Оплатить сейчас') {
+      const userState = userStates.get(user.id);
+      
+      // Проверяем что пользователь выбрал план
+      if (!userState || !userState.planType) {
+        await bot.sendMessage(
+          chatId,
+          '❌ **Ошибка**\n\nСначала выберите план подписки.',
+          { parse_mode: 'Markdown', ...subscriptionPlansKeyboard }
+        );
+        return;
+      }
+      
+      const planType = userState.planType;
+      userStates.delete(user.id);
+      
+      try {
+        await bot.sendMessage(
+          chatId,
+          '⏳ Создаю ссылку для оплаты...',
+          { parse_mode: 'Markdown' }
+        );
+        
+        // Создаем платеж через YooKassa
+        const paymentResult = await createSubscriptionPayment(user.id, planType);
+        
+        if (paymentResult.success && paymentResult.paymentUrl) {
+          await bot.sendMessage(
+            chatId,
+            '💳 **Ссылка для оплаты создана**\n\n' +
+            'Нажмите кнопку ниже для перехода к оплате.\n\n' +
+            '⚠️ После успешной оплаты подписка активируется автоматически.',
+            {
+              parse_mode: 'Markdown',
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '💳 Перейти к оплате', url: paymentResult.paymentUrl }],
+                  [{ text: '⬅️ Назад к планам', callback_data: 'back_to_plans' }]
+                ]
+              }
+            }
+          );
+        } else {
+          await bot.sendMessage(
+            chatId,
+            `❌ **Ошибка создания платежа**\n\n${paymentResult.error || 'Неизвестная ошибка'}\n\nПопробуйте позже или обратитесь в поддержку.`,
+            { parse_mode: 'Markdown', ...mainKeyboard }
+          );
+        }
+      } catch (error) {
+        console.error('Ошибка создания платежа:', error);
+        await bot.sendMessage(
+          chatId,
+          '❌ **Техническая ошибка**\n\nНе удалось создать платеж.\nПопробуйте позже.',
+          { parse_mode: 'Markdown', ...mainKeyboard }
+        );
+      }
       return;
     }
 
@@ -1117,6 +1421,133 @@ async function handleTextMessage(bot, msg) {
       await bot.sendMessage(
         chatId,
         '🗑️ **Удаление записей**\n\n' +
+        'Выберите, что хотите удалить:',
+        { parse_mode: 'Markdown', ...deleteRecordsKeyboard }
+      );
+      return;
+    }
+
+    if (text === '📈 Прогресс' || text.includes('Прогресс')) {
+      userStates.delete(user.id);
+      
+      await bot.sendMessage(chatId, '📊 Анализирую ваш прогресс...');
+      
+      try {
+        const progressReport = await analyzeUserProgress(dbUser.id);
+        const formattedReport = await formatProgressReport(progressReport);
+        
+        await sendLongMessage(bot, chatId, formattedReport, mainKeyboard);
+      } catch (error) {
+        console.error('Ошибка анализа прогресса:', error);
+        await bot.sendMessage(
+          chatId,
+          '❌ Ошибка при анализе прогресса. Попробуйте позже.',
+          mainKeyboard
+        );
+      }
+      return;
+    }
+
+    if (text === '💬 Как пользоваться ботом?' || text.includes('Как пользоваться')) {
+      userStates.delete(user.id);
+      const tutorialMessage = `💬 **Как пользоваться FitnessBotAI**
+
+📱 **Основные разделы:**
+
+1️⃣ **🤖 ИИ-тренер**
+   Задавайте любые вопросы о фитнесе, питании, тренировках.
+   Бот проанализирует ваш запрос и даст персональные рекомендации.
+
+2️⃣ **🧬 ИИ-инструменты**
+   Специализированные инструменты:
+   • \`/training_program\` - программа тренировок
+   • \`/nutrition_plan\` - план питания
+   • \`/deepresearch\` - научные исследования
+   • \`/composition_analysis\` - анализ добавок
+
+3️⃣ **🎯 Мои данные**
+   Записывайте вес, тренировки, устанавливайте цели
+
+4️⃣ **📈 Аналитика**
+   Просматривайте графики прогресса и отчеты
+
+5️⃣ **💎 Подписка**
+   Управление тарифным планом
+
+💡 **Советы:**
+• Формулируйте вопросы конкретно
+• Используйте разные ИИ-инструменты для разных задач
+• Регулярно записывайте данные для точной аналитики
+• Проверяйте статистику запросов в профиле`;
+
+      await bot.sendMessage(chatId, tutorialMessage, { parse_mode: 'Markdown', ...helpKeyboard });
+      return;
+    }
+
+    if (text === '⚡ Что умеет ИИ-тренер?' || text.includes('Что умеет')) {
+      userStates.delete(user.id);
+      const capabilitiesMessage = `⚡ **Возможности ИИ-тренера**
+
+🏋️ **Программы тренировок:**
+• Персональные планы под ваши цели
+• Учет уровня подготовки
+• Рекомендации по технике упражнений
+• Прогрессивные программы
+
+🥗 **Питание:**
+• Индивидуальные планы питания
+• Расчет калорий и макронутриентов
+• Рецепты и меню
+• Советы по добавкам
+
+📊 **Анализ прогресса:**
+• Отслеживание изменений веса
+• Анализ эффективности тренировок
+• Рекомендации по корректировке плана
+• Мотивация и поддержка
+
+🔬 **Научный подход:**
+• Глубокие исследования тем
+• Анализ состава спортпита
+• Ответы на сложные вопросы
+• Ссылки на исследования
+
+💪 **Персонализация:**
+• Учет ваших целей и ограничений
+• Адаптация под уровень подготовки
+• Индивидуальные рекомендации
+• Постоянное обучение на ваших данных
+
+🎯 **Цели которые можно достичь:**
+• Набор мышечной массы
+• Снижение веса
+• Увеличение силы
+• Повышение выносливости
+• Улучшение гибкости
+
+📱 Просто задавайте вопросы или используйте специальные команды!`;
+
+      await bot.sendMessage(chatId, capabilitiesMessage, { parse_mode: 'Markdown', ...helpKeyboard });
+      return;
+    }
+
+    if (text === '🗑️ Удалить цели' || text.includes('Удалить цели')) {
+      userStates.set(user.id, 'confirm_delete_goals');
+      await bot.sendMessage(
+        chatId,
+        '🗑️ **Удаление целей**\n\n' +
+        'Вы уверены, что хотите удалить все ваши цели?\n\n' +
+        'Это действие нельзя отменить!',
+        { parse_mode: 'Markdown', reply_markup: { keyboard: [['✅ Да, удалить'], ['❌ Отмена']], resize_keyboard: true } }
+      );
+      return;
+    }
+
+    if (text === '🗑️ Удалить записи' || text.includes('Удалить записи')) {
+      userStates.delete(user.id);
+      await bot.sendMessage(
+        chatId,
+        '🗑️ **Удаление записей**\n\n' +
         '⚠️ **Внимание!** Удаленные данные восстановить невозможно.\n\n' +
         'Что вы хотите удалить?',
         { parse_mode: 'Markdown', ...deleteRecordsKeyboard }
@@ -1168,6 +1599,172 @@ async function handleTextMessage(bot, msg) {
 
     // Проверяем, находится ли пользователь в режиме ИИ-тренера
     const userState = userStates.get(user.id);
+    
+    // Обработка ввода для простых воркфлоу (deepresearch, composition_analysis)
+    if (userState && userState.mode === 'awaiting_deepresearch_query') {
+      const subscription = await getActiveSubscription(dbUser.id);
+      const freeRequests = await getUserFreeRequests(dbUser.id);
+      
+      userStates.delete(user.id);
+      
+      await bot.sendMessage(
+        chatId,
+        '🔬 **Глубокое исследование**\n\n' +
+        `📝 Тема: ${text}\n\n` +
+        '⏳ Провожу глубокий анализ и поиск научных данных...',
+        { parse_mode: 'Markdown' }
+      );
+      
+      try {
+        const workflowId = process.env.COZE_DEEP_RESEARCH_WORKFLOW_ID;
+        const result = await runWorkflow(workflowId, { query: text });
+        
+        if (!result || !result.response || result.response.trim() === '') {
+          await bot.sendMessage(
+            chatId,
+            '❌ **Ошибка исследования**\n\nAI-воркфлоу не смог сгенерировать ответ.\nПопробуйте позже.',
+            { parse_mode: 'Markdown', ...mainKeyboard }
+          );
+          return;
+        }
+        
+        // Используем запрос
+        if (!subscription || subscription.status !== 'active') {
+          await useFreeRequest(dbUser.id);
+        } else {
+          await incrementRequestUsage(dbUser.id);
+        }
+        
+        // Отправляем ответ с разбиением на части если нужно
+        await sendLongMessage(bot, chatId, result.response, mainKeyboard);
+      } catch (error) {
+        console.error('Ошибка глубокого исследования:', error);
+        await bot.sendMessage(
+          chatId,
+          '❌ **Техническая ошибка**\n\nНе удалось провести исследование.\nПопробуйте позже.',
+          { parse_mode: 'Markdown', ...mainKeyboard }
+        );
+      }
+      return;
+    }
+    
+    if (userState && userState.mode === 'awaiting_composition_query') {
+      const subscription = await getActiveSubscription(dbUser.id);
+      const freeRequests = await getUserFreeRequests(dbUser.id);
+      
+      userStates.delete(user.id);
+      
+      await bot.sendMessage(
+        chatId,
+        '🧪 **Анализ состава добавок**\n\n' +
+        `📝 Добавка: ${text}\n\n` +
+        '⏳ Анализирую состав и даю рекомендации...',
+        { parse_mode: 'Markdown' }
+      );
+      
+      try {
+        const workflowId = process.env.COZE_COMPOSITION_ANALYSIS_WORKFLOW_ID;
+        const result = await runWorkflow(workflowId, { supplement: text });
+        
+        if (!result || !result.response || result.response.trim() === '') {
+          await bot.sendMessage(
+            chatId,
+            '❌ **Ошибка анализа**\n\nAI-воркфлоу не смог сгенерировать ответ.\nПопробуйте позже.',
+            { parse_mode: 'Markdown', ...mainKeyboard }
+          );
+          return;
+        }
+        
+        // Используем запрос
+        if (!subscription || subscription.status !== 'active') {
+          await useFreeRequest(dbUser.id);
+        } else {
+          await incrementRequestUsage(dbUser.id);
+        }
+        
+        // Отправляем ответ с разбиением на части если нужно
+        await sendLongMessage(bot, chatId, result.response, mainKeyboard);
+      } catch (error) {
+        console.error('Ошибка анализа состава:', error);
+        await bot.sendMessage(
+          chatId,
+          '❌ **Техническая ошибка**\n\nНе удалось провести анализ.\nПопробуйте позже.',
+          { parse_mode: 'Markdown', ...mainKeyboard }
+        );
+      }
+      return;
+    }
+    
+    // Обработка ответов на интерактивные воркфлоу (training_program, nutrition_plan)
+    if (userState && (userState.mode === 'interactive_training_program' || userState.mode === 'interactive_nutrition_plan')) {
+      const subscription = await getActiveSubscription(dbUser.id);
+      const freeRequests = await getUserFreeRequests(dbUser.id);
+      
+      await bot.sendMessage(
+        chatId,
+        '⏳ Обрабатываю ваш ответ...',
+        { parse_mode: 'Markdown' }
+      );
+      
+      try {
+        // Продолжаем интерактивный воркфлоу
+        const result = await continueInteractiveWorkflow(
+          userState.eventId,
+          text,
+          userState.workflowType,
+          dbUser.id
+        );
+        
+        if (!result || !result.message || result.message.trim() === '') {
+          await bot.sendMessage(
+            chatId,
+            '❌ **Ошибка обработки**\n\nНе удалось обработать ваш ответ.\nПопробуйте позже.',
+            { parse_mode: 'Markdown', ...mainKeyboard }
+          );
+          userStates.delete(user.id);
+          return;
+        }
+        
+        // Проверяем, есть ли еще вопросы
+        if (result.eventId && !result.isComplete) {
+          // Обновляем eventId для следующего вопроса
+          userStates.set(user.id, {
+            mode: userState.mode,
+            eventId: result.eventId,
+            workflowType: userState.workflowType
+          });
+          
+          // Отправляем следующий вопрос
+          await bot.sendMessage(
+            chatId,
+            result.message,
+            { parse_mode: 'Markdown', reply_markup: { force_reply: true } }
+          );
+        } else {
+          // Воркфлоу завершен
+          userStates.delete(user.id);
+          
+          // Используем запрос
+          if (!subscription || subscription.status !== 'active') {
+            await useFreeRequest(dbUser.id);
+          } else {
+            await incrementRequestUsage(dbUser.id);
+          }
+          
+          // Отправляем финальный результат
+          await sendLongMessage(bot, chatId, result.message, mainKeyboard);
+        }
+      } catch (error) {
+        console.error('Ошибка продолжения интерактивного воркфлоу:', error);
+        await bot.sendMessage(
+          chatId,
+          '❌ **Техническая ошибка**\n\nНе удалось обработать ответ.\nПопробуйте позже.',
+          { parse_mode: 'Markdown', ...mainKeyboard }
+        );
+        userStates.delete(user.id);
+      }
+      return;
+    }
     
     if (userState === 'ai_trainer') {
       // Проверяем доступ пользователя
@@ -1452,6 +2049,88 @@ ${workflowContext.lastResponse}
         userStates.delete(user.id);
         await bot.sendMessage(
           chatId,
+          '❌ **Удаление отменено**\n\nВаши данные остались без изменений.',
+          { parse_mode: 'Markdown', ...mainKeyboard }
+        );
+      }
+      return;
+    }
+
+    if (userState === 'confirm_delete_goals') {
+      if (text === '✅ Да, удалить' || text.includes('Да')) {
+        userStates.delete(user.id);
+        
+        try {
+          // Удаляем все цели пользователя
+          const goals = await getUserGoals(dbUser.id);
+          if (goals && goals.length > 0) {
+            for (const goal of goals) {
+              await deleteUserGoal(goal.id);
+            }
+            
+            await bot.sendMessage(
+              chatId,
+              `✅ **Цели удалены**\n\n` +
+              `Удалено целей: ${goals.length}\n\n` +
+              `Все ваши цели были удалены из профиля.`,
+              { parse_mode: 'Markdown', ...mainKeyboard }
+            );
+          } else {
+            await bot.sendMessage(
+              chatId,
+              '📝 У вас нет установленных целей для удаления.',
+              mainKeyboard
+            );
+          }
+        } catch (error) {
+          console.error('Ошибка удаления целей:', error);
+          await bot.sendMessage(
+            chatId,
+            '❌ Ошибка при удалении целей. Попробуйте позже.',
+            mainKeyboard
+          );
+        }
+      } else {
+        userStates.delete(user.id);
+        await bot.sendMessage(
+          chatId,
+          '❌ **Удаление отменено**\n\nВаши цели остались без изменений.',
+          { parse_mode: 'Markdown', ...mainKeyboard }
+        );
+      }
+      return;
+    }
+
+    if (userState === 'confirm_delete_all') {
+      if (text === '✅ Да, удалить ВСЁ' || text.includes('Да')) {
+        userStates.delete(user.id);
+        
+        try {
+          await clearAllUserData(dbUser.id);
+          
+          await bot.sendMessage(
+            chatId,
+            `🗑️ **Все данные удалены**\n\n` +
+            `Удалены:\n` +
+            `• Все записи о весе\n` +
+            `• Вся история тренировок\n` +
+            `• Все цели\n` +
+            `• Весь прогресс\n\n` +
+            `Ваш профиль очищен. Можете начать заново!`,
+            { parse_mode: 'Markdown', ...mainKeyboard }
+          );
+        } catch (error) {
+          console.error('Ошибка полного удаления данных:', error);
+          await bot.sendMessage(
+            chatId,
+            '❌ Ошибка при удалении данных. Попробуйте позже.',
+            mainKeyboard
+          );
+        }
+      } else {
+        userStates.delete(user.id);
+        await bot.sendMessage(
+          chatId,
           '❌ **Удаление отменено**\n\nВсе ваши данные остались в безопасности.',
           { parse_mode: 'Markdown', ...mainKeyboard }
         );
@@ -1566,7 +2245,54 @@ async function handleCallbackQuery(bot, callbackQuery) {
       await showPaymentConfirmation(bot, chatId, messageId, planType);
       return;
     }
+    
+    // Обработка кнопки "Назад к планам" из inline клавиатуры
+    if (data === 'back_to_plans') {
+      await bot.editMessageText(
+        '💎 **Выбор тарифного плана**\n\n' +
+        'Выберите подходящий план:',
+        {
+          chat_id: chatId,
+          message_id: messageId,
+          parse_mode: 'Markdown',
+          ...subscriptionPlansKeyboard
+        }
+      );
+      await bot.answerCallbackQuery(callbackQuery.id);
+      return;
+    }
 
+    // Обработка подтверждения оплаты
+    if (data === 'confirm_payment' || data.startsWith('confirm_payment_')) {
+      const planType = data === 'confirm_payment' ? 'basic' : data.replace('confirm_payment_', '');
+      await processPayment(bot, chatId, messageId, userId, planType);
+      return;
+    }
+    
+    // Обработка отмены оплаты
+    if (data === 'cancel_payment') {
+      try {
+        await bot.editMessageText(
+          '❌ **Оплата отменена**\n\n' +
+          'Вы можете выбрать другой план или вернуться в главное меню.',
+          {
+            chat_id: chatId,
+            message_id: messageId,
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '💎 Выбрать план', callback_data: 'subscription_menu' }],
+                [{ text: '🏠 Главное меню', callback_data: 'main_menu' }]
+              ]
+            }
+          }
+        );
+        return;
+      } catch (error) {
+        console.error('Error in cancel_payment handler:', error);
+      }
+    }
+    
     // Обработка подтверждения оплаты
     if (data.startsWith('confirm_payment_')) {
       const planType = data.replace('confirm_payment_', '');
@@ -1724,7 +2450,7 @@ async function showSubscriptionMenu(bot, chatId, userId, messageId = null) {
       message += `💎 **Доступные планы:**\n`;
       message += `• 🥉 Базовый - 150₽ (100 запросов/месяц)\n`;
       message += `• 🥈 Стандарт - 300₽ (300 запросов/месяц)\n`;
-      message += `• 🥇 Премиум - 450₽ (безлимит/месяц)\n\n`;
+      message += `• 🥇 Премиум - 450₽ (600 запросов/месяц)\n\n`;
       message += `Выберите подходящий план:`;
       
       if (messageId) {
@@ -1785,7 +2511,7 @@ async function showPaymentConfirmation(bot, chatId, messageId, planType) {
   const plans = {
     basic: { name: 'Базовый', price: 150, requests: 100 },
     standard: { name: 'Стандарт', price: 300, requests: 300 },
-    premium: { name: 'Премиум', price: 450, requests: 'безлимит' }
+    premium: { name: 'Премиум', price: 450, requests: 600 }
   };
   
   const plan = plans[planType];

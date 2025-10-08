@@ -6,6 +6,12 @@ import crypto from 'crypto';
 
 let db;
 
+// Генерация токена доступа
+function generateAccessToken(userId, paymentId) {
+  const data = `${userId}-${paymentId}-${Date.now()}`;
+  return crypto.createHash('md5').update(data).digest('hex');
+}
+
 // Инициализация базы данных
 export async function initDatabase() {
   return new Promise((resolve, reject) => {

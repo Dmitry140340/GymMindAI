@@ -104,7 +104,7 @@ export const subscriptionPlansKeyboard = {
       [{ text: '💎 Базовый план - 150₽' }],
       [{ text: '⭐ Стандартный план - 300₽' }],
       [{ text: '🚀 Премиум план - 450₽' }],
-      [{ text: '⬅️ Назад к подписке' }]
+      [{ text: '⬅️ Назад в меню' }]
     ],
     resize_keyboard: true,
     one_time_keyboard: false
@@ -138,22 +138,16 @@ export const helpKeyboard = {
 };
 
 // Клавиатура ИИ-инструментов
-// Клавиатура AI инструментов (используем callback для команд)
+// Клавиатура AI инструментов (обычные кнопки без эмодзи в командах)
 export const aiToolsKeyboard = {
   reply_markup: {
-    inline_keyboard: [
-      [
-        { text: '🏋️‍♂️ Программа тренировок', callback_data: '/training_program' },
-        { text: '🥗 План питания', callback_data: '/nutrition_plan' }
-      ],
-      [
-        { text: '🔬 Глубокое исследование', callback_data: '/deepresearch' },
-        { text: '🧪 Анализ состава', callback_data: '/composition_analysis' }
-      ],
-      [
-        { text: '⬅️ Назад в меню', callback_data: 'main_menu' }
-      ]
-    ]
+    keyboard: [
+      [{ text: '/training_program' }, { text: '/nutrition_plan' }],
+      [{ text: '/deepresearch' }, { text: '/composition_analysis' }],
+      [{ text: '⬅️ Назад в меню' }]
+    ],
+    resize_keyboard: true,
+    one_time_keyboard: false
   }
 };
 

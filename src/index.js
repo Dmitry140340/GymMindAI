@@ -17,8 +17,16 @@ const PORT = process.env.PORT || 3000;
 // Middleware для parsing JSON
 app.use(express.json());
 
-// Создаем экземпляр бота
-const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
+// Создаем экземпляр бота с улучшенными настройками polling
+const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { 
+  polling: {
+    interval: 300,  // Интервал между запросами (мс)
+    autoStart: true,
+    params: {
+      timeout: 10  // Таймаут long polling (сек)
+    }
+  }
+});
 
 // Инициализация базы данных
 await initDatabase();
@@ -135,13 +143,19 @@ app.get('/webhook/payment', (req, res) => {
   });
 });
 
-// Обработка ошибок бота
+// Обработка ошибок бота с улучшенным логированием
 bot.on('error', (error) => {
-  console.error('Bot error:', error);
+  console.error('❌ Bot error:', error.message);
+  // Не завершаем процесс, просто логируем
 });
 
 bot.on('polling_error', (error) => {
-  console.error('Polling error:', error);
+  console.error('⚠️ Polling error:', error.code || error.message);
+  // ECONNRESET, ETIMEDOUT - обычные ошибки при нестабильном соединении
+  // Бот автоматически переподключится
+  if (error.code === 'EFATAL' || error.code === 'ECONNRESET') {
+    console.log('🔄 Переподключение к Telegram API...');
+  }
 });
 
 // Запуск сервера

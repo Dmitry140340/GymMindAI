@@ -65,7 +65,6 @@ export function setupAdminHandlers(bot) {
     }
   });
 
-  // Рассылка сообщений
   // Тестовая активация подписки для пользователя (только для тестирования)
   bot.onText(/\/admin_activate_test (\d+)/, async (msg, match) => {
     const chatId = msg.chat.id;
@@ -80,23 +79,16 @@ export function setupAdminHandlers(bot) {
     }
     
     try {
-      console.log(`Attempting to activate test subscription for user: ${targetTelegramId}`);
-      
-      // Находим пользователя
+      // Проверяем существование пользователя
       const user = await getUserByTelegramId(targetTelegramId);
       if (!user) {
-        await bot.sendMessage(chatId, '❌ Пользователь не найден.');
+        await bot.sendMessage(chatId, `❌ Пользователь с ID ${targetTelegramId} не найден в базе.`);
         return;
       }
       
-      console.log(`Found user in database:`, user);
+      const testPaymentId = `test_payment_${Date.now()}`;
       
-      // Создаем тестовую подписку напрямую
-      const testPaymentId = `test_${Date.now()}_${targetTelegramId}`;
-      const endDate = new Date();
-      endDate.setMonth(endDate.getMonth() + 1); // +1 месяц
-      
-      // Генерируем токен доступа
+      // Генерируем access token
       const crypto = await import('crypto');
       const timestamp = Date.now();
       const data = `${user.id}-${testPaymentId}-${timestamp}-${process.env.YOOKASSA_SECRET_KEY}`;
@@ -134,6 +126,75 @@ export function setupAdminHandlers(bot) {
     } catch (error) {
       console.error('Ошибка активации тестовой подписки:', error);
       await bot.sendMessage(chatId, `❌ Ошибка активации тестовой подписки: ${error.message}`);
+    }
+  });
+  
+  // Быстрая активация ПРЕМИУМ подписки для себя или другого пользователя
+  bot.onText(/\/admin_premium(?:\s+(\d+))?/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const targetTelegramId = match[1] ? parseInt(match[1]) : userId; // Если не указан ID - себе
+    
+    const adminIds = process.env.ADMIN_IDS ? process.env.ADMIN_IDS.split(',').map(id => parseInt(id)) : [];
+    
+    if (!adminIds.includes(userId)) {
+      await bot.sendMessage(chatId, '❌ У вас нет прав администратора.');
+      return;
+    }
+    
+    try {
+      // Проверяем существование пользователя
+      const user = await getUserByTelegramId(targetTelegramId);
+      if (!user) {
+        await bot.sendMessage(chatId, `❌ Пользователь с ID ${targetTelegramId} не найден в базе. Попросите пользователя запустить бота командой /start`);
+        return;
+      }
+      
+      const testPaymentId = `test_premium_${Date.now()}`;
+      
+      // Вставляем ПРЕМИУМ подписку с 600 запросами
+      const { createSubscription, activateSubscription } = await import('../services/database.js');
+      const subscriptionId = await createSubscription(user.id, 'premium', 450, testPaymentId);
+      
+      console.log(`Premium subscription created with ID: ${subscriptionId}`);
+      
+      // Активируем подписку
+      const activated = await activateSubscription(testPaymentId);
+      console.log(`Subscription activation result: ${activated}`);
+      
+      if (activated) {
+        await bot.sendMessage(chatId, 
+          `✅ Премиум подписка активирована!\n\n` +
+          `👤 Пользователь: ${targetTelegramId}\n` +
+          `📦 План: Премиум (450₽)\n` +
+          `🔢 Запросов: 600\n` +
+          `⏰ Срок: 30 дней\n` +
+          `🆔 ID подписки: ${subscriptionId}`
+        );
+        
+        // Уведомляем пользователя
+        try {
+          await bot.sendMessage(targetTelegramId, 
+            '🎉 **Премиум подписка активирована!**\n\n' +
+            '✨ Что доступно:\n' +
+            '• 600 запросов к ИИ-тренеру\n' +
+            '• Все ИИ-инструменты\n' +
+            '• Персональные программы тренировок\n' +
+            '• Планы питания\n' +
+            '• Анализ прогресса\n\n' +
+            '💬 Начните использовать прямо сейчас!',
+            { parse_mode: 'Markdown' }
+          );
+        } catch (notifyError) {
+          console.log('Не удалось уведомить пользователя:', notifyError.message);
+        }
+      } else {
+        await bot.sendMessage(chatId, `❌ Подписка создана но не активирована. ID: ${subscriptionId}`);
+      }
+      
+    } catch (error) {
+      console.error('Ошибка активации премиум подписки:', error);
+      await bot.sendMessage(chatId, `❌ Ошибка активации подписки: ${error.message}`);
     }
   });
 
