@@ -241,8 +241,8 @@ async function handleTextMessage(bot, msg) {
             return;
           }
           
-          // Запускаем интерактивный воркфлоу
-          const result = await runWorkflow(workflowId, {});
+          // Запускаем интерактивный воркфлоу (первый запуск с пустым input)
+          const result = await runWorkflow(workflowId, { input: "" });
           
           // Проверяем, что получен ответ
           if (!result || !result.message || result.message.trim() === '') {
@@ -338,8 +338,8 @@ async function handleTextMessage(bot, msg) {
             return;
           }
           
-          // Запускаем интерактивный воркфлоу
-          const result = await runWorkflow(workflowId, {});
+          // Запускаем интерактивный воркфлоу (первый запуск с пустым input)
+          const result = await runWorkflow(workflowId, { input: "" });
           
           // Проверяем, что получен ответ
           if (!result || !result.message || result.message.trim() === '') {
