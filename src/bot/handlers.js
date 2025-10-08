@@ -1850,15 +1850,13 @@ ${workflowContext.lastResponse}
         if (requestStatus.type === 'free') {
           await useFreeRequest(dbUser.id);
           const freeRequests = await getUserFreeRequests(dbUser.id);
-          await bot.sendMessage(
-            chatId, 
-            aiResponse.message + `\n\n🆓 Бесплатных запросов осталось: ${freeRequests.remaining}/7`
-          );
+          const messageWithCounter = aiResponse.message + `\n\n🆓 Бесплатных запросов осталось: ${freeRequests.remaining}/7`;
+          await sendLongMessage(bot, chatId, messageWithCounter, mainKeyboard);
         } else if (requestStatus.type === 'subscription') {
           await incrementRequestUsage(dbUser.id);
-          await bot.sendMessage(chatId, aiResponse.message);
+          await sendLongMessage(bot, chatId, aiResponse.message, mainKeyboard);
         } else {
-          await bot.sendMessage(chatId, aiResponse.message);
+          await sendLongMessage(bot, chatId, aiResponse.message, mainKeyboard);
         }
       } else {
         await bot.sendMessage(chatId, '❌ Извините, не удалось получить ответ от ИИ. Попробуйте позже.');
