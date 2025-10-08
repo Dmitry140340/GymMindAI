@@ -1617,7 +1617,7 @@ async function handleTextMessage(bot, msg) {
       
       try {
         const workflowId = process.env.COZE_DEEP_RESEARCH_WORKFLOW_ID;
-        const result = await runWorkflow(workflowId, { query: text });
+        const result = await runWorkflow(workflowId, { input: text });
         
         if (!result || !result.response || result.response.trim() === '') {
           await bot.sendMessage(
@@ -1664,7 +1664,7 @@ async function handleTextMessage(bot, msg) {
       
       try {
         const workflowId = process.env.COZE_COMPOSITION_ANALYSIS_WORKFLOW_ID;
-        const result = await runWorkflow(workflowId, { supplement: text });
+        const result = await runWorkflow(workflowId, { input: text });
         
         if (!result || !result.response || result.response.trim() === '') {
           await bot.sendMessage(
