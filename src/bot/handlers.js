@@ -280,6 +280,12 @@ async function handleTextMessage(bot, msg) {
               await incrementRequestUsage(dbUser.id);
             }
             
+            // Сохраняем контекст для возможности уточняющих вопросов
+            userWorkflowContext.set(user.id, {
+              lastResponse: result.message,
+              timestamp: Date.now()
+            });
+            
             await bot.sendMessage(chatId, result.message, { parse_mode: 'Markdown', ...mainKeyboard });
           }
         } catch (error) {
@@ -376,6 +382,12 @@ async function handleTextMessage(bot, msg) {
             } else {
               await incrementRequestUsage(dbUser.id);
             }
+            
+            // Сохраняем контекст для возможности уточняющих вопросов
+            userWorkflowContext.set(user.id, {
+              lastResponse: result.message,
+              timestamp: Date.now()
+            });
             
             await bot.sendMessage(chatId, result.message, { parse_mode: 'Markdown', ...mainKeyboard });
           }
@@ -1253,36 +1265,36 @@ async function handleTextMessage(bot, msg) {
 
     if (text === '❓ Помощь' || text.includes('Помощь')) {
       userStates.delete(user.id);
-      const helpMessage = `❓ **Помощь по использованию FitnessBotAI**
+      const helpMessage = `❓ *Помощь по использованию FitnessBotAI*
 
-🤖 **ИИ-тренер** - ваш персональный помощник по фитнесу:
+🤖 *ИИ-тренер* - ваш персональный помощник по фитнесу:
 • Отвечает на вопросы о тренировках
 • Составляет программы упражнений  
 • Дает советы по питанию
 • Помогает с мотивацией
 
-📊 **Мой профиль** - информация о вашей учетной записи:
+📊 *Мой профиль* - информация о вашей учетной записи:
 • Статус подписки
 • Оставшиеся запросы
 • История платежей
 
-🎯 **Мои данные** - управление фитнес-данными:
+🎯 *Мои данные* - управление фитнес-данными:
 • Запись веса и измерений
 • Установка целей
 • Добавление тренировок
 • Просмотр прогресса
 
-📈 **Аналитика** - отчеты и графики:
+📈 *Аналитика* - отчеты и графики:
 • График изменения веса
 • Анализ тренировок
 • Отчет о прогрессе
 
-💎 **Подписка** - управление тарифным планом:
+💎 *Подписка* - управление тарифным планом:
 • Оформление подписки
 • Просмотр тарифов
 • История платежей
 
-🆘 **Нужна помощь?** Напишите в поддержку: @support_bot`;
+🆘 *Нужна помощь?* Напишите в поддержку: @support_bot`;
 
       await bot.sendMessage(chatId, helpMessage, { parse_mode: 'Markdown', ...mainKeyboard });
       return;
@@ -1635,6 +1647,12 @@ async function handleTextMessage(bot, msg) {
           await incrementRequestUsage(dbUser.id);
         }
         
+        // Сохраняем контекст для возможности уточняющих вопросов
+        userWorkflowContext.set(user.id, {
+          lastResponse: result.response,
+          timestamp: Date.now()
+        });
+        
         // Отправляем ответ с разбиением на части если нужно
         await sendLongMessage(bot, chatId, result.response, mainKeyboard);
       } catch (error) {
@@ -1681,6 +1699,12 @@ async function handleTextMessage(bot, msg) {
         } else {
           await incrementRequestUsage(dbUser.id);
         }
+        
+        // Сохраняем контекст для возможности уточняющих вопросов
+        userWorkflowContext.set(user.id, {
+          lastResponse: result.response,
+          timestamp: Date.now()
+        });
         
         // Отправляем ответ с разбиением на части если нужно
         await sendLongMessage(bot, chatId, result.response, mainKeyboard);
@@ -1750,6 +1774,12 @@ async function handleTextMessage(bot, msg) {
           } else {
             await incrementRequestUsage(dbUser.id);
           }
+          
+          // Сохраняем контекст для возможности уточняющих вопросов
+          userWorkflowContext.set(user.id, {
+            lastResponse: result.message,
+            timestamp: Date.now()
+          });
           
           // Отправляем финальный результат
           await sendLongMessage(bot, chatId, result.message, mainKeyboard);
