@@ -138,15 +138,22 @@ export const helpKeyboard = {
 };
 
 // Клавиатура ИИ-инструментов
+// Клавиатура AI инструментов (используем callback для команд)
 export const aiToolsKeyboard = {
   reply_markup: {
-    keyboard: [
-      [{ text: '🏋️‍♂️ /training_program' }, { text: '🥗 /nutrition_plan' }],
-      [{ text: '🔬 /deepresearch' }, { text: '🧪 /composition_analysis' }],
-      [{ text: '⬅️ Назад в меню' }]
-    ],
-    resize_keyboard: true,
-    one_time_keyboard: false
+    inline_keyboard: [
+      [
+        { text: '🏋️‍♂️ Программа тренировок', callback_data: '/training_program' },
+        { text: '🥗 План питания', callback_data: '/nutrition_plan' }
+      ],
+      [
+        { text: '🔬 Глубокое исследование', callback_data: '/deepresearch' },
+        { text: '🧪 Анализ состава', callback_data: '/composition_analysis' }
+      ],
+      [
+        { text: '⬅️ Назад в меню', callback_data: 'main_menu' }
+      ]
+    ]
   }
 };
 

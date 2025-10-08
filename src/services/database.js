@@ -661,6 +661,27 @@ export async function updatePaymentStatus(yookassaPaymentId, status) {
   });
 }
 
+// Получить историю платежей пользователя
+export async function getUserPayments(userId) {
+  return new Promise((resolve, reject) => {
+    db.all(
+      `SELECT p.*, s.plan_type 
+       FROM payments p
+       LEFT JOIN subscriptions s ON p.subscription_id = s.id
+       WHERE p.user_id = ?
+       ORDER BY p.created_at DESC`,
+      [userId],
+      (err, rows) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve(rows || []);
+      }
+    );
+  });
+}
+
 // Проверка истёкших подписок
 export async function checkExpiredSubscriptions() {
   return new Promise((resolve, reject) => {
@@ -1129,17 +1150,17 @@ export async function getUserFreeRequests(userId) {
         }
         
         if (!row) {
-          resolve({ remaining: 0, total: 7, used: 0 });
+          resolve({ remaining: 0, limit: 7, used: 0 });
           return;
         }
         
-        const total = row.free_requests_limit || 7;
+        const limit = row.free_requests_limit || 7;
         const used = row.free_requests_used || 0;
-        const remaining = Math.max(0, total - used);
+        const remaining = Math.max(0, limit - used);
         
         resolve({
           remaining: remaining,
-          total: total,
+          limit: limit,
           used: used
         });
       }

@@ -15,13 +15,17 @@ if (!fs.existsSync(tempDir)) {
 }
 
 // Генерация графика веса
-export async function generateWeightChart(metrics, userId) {
-  if (metrics.length === 0) {
-    return null;
-  }
+export async function generateWeightChart(userId) {
+  try {
+    // Получаем метрики пользователя
+    const allMetrics = await getUserMetrics(userId, 'weight', 100);
+    
+    if (!allMetrics || allMetrics.length === 0) {
+      return null;
+    }
 
-  // Сортируем метрики по дате
-  const sortedMetrics = metrics.sort((a, b) => new Date(a.recorded_at) - new Date(b.recorded_at));
+    // Сортируем метрики по дате
+    const sortedMetrics = allMetrics.sort((a, b) => new Date(a.recorded_at) - new Date(b.recorded_at));
 
   const labels = sortedMetrics.map(record => {
     const date = new Date(record.recorded_at);
@@ -87,13 +91,21 @@ export async function generateWeightChart(metrics, userId) {
   }, 5 * 60 * 1000);
   
   return imagePath;
+  } catch (error) {
+    console.error('Error generating weight chart:', error);
+    return null;
+  }
 }
 
 // Генерация графика тренировок
-export async function generateWorkoutChart(workouts, userId) {
-  if (workouts.length === 0) {
-    return null;
-  }
+export async function generateWorkoutChart(userId) {
+  try {
+    // Получаем тренировки пользователя
+    const workouts = await getUserWorkouts(userId, 50);
+    
+    if (!workouts || workouts.length === 0) {
+      return null;
+    }
 
   // Подсчитываем количество тренировок по типам
   const workoutCounts = {};
@@ -160,12 +172,25 @@ export async function generateWorkoutChart(workouts, userId) {
   }, 5 * 60 * 1000);
   
   return imagePath;
+  } catch (error) {
+    console.error('Error generating workout chart:', error);
+    return null;
+  }
 }
 
 // Генерация графика прогресса (общая статистика)
-export async function generateProgressChart(metrics, workouts, userId) {
-  // Создаем комбинированный график с весом и тренировками
-  const weightMetrics = metrics.filter(m => m.metric_type === 'weight')
+export async function generateProgressChart(userId) {
+  try {
+    // Получаем данные пользователя
+    const metrics = await getUserMetrics(userId, null, 100);
+    const workouts = await getUserWorkouts(userId, 50);
+    
+    if ((!metrics || metrics.length === 0) && (!workouts || workouts.length === 0)) {
+      return null;
+    }
+    
+    // Создаем комбинированный график с весом и тренировками
+    const weightMetrics = (metrics || []).filter(m => m.metric_type === 'weight')
     .sort((a, b) => new Date(a.recorded_at) - new Date(b.recorded_at));
   
   // Группируем тренировки по датам
@@ -267,6 +292,10 @@ export async function generateProgressChart(metrics, workouts, userId) {
   }, 5 * 60 * 1000);
   
   return imagePath;
+  } catch (error) {
+    console.error('Error generating progress chart:', error);
+    return null;
+  }
 }
 
 // Генерация текстового отчета

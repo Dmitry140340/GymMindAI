@@ -1,4 +1,4 @@
-import { 
+﻿import { 
   createOrUpdateUser, 
   getUserByTelegramId, 
   getActiveSubscription,
@@ -1051,7 +1051,7 @@ async function handleTextMessage(bot, msg) {
         if (weightRecords && weightRecords.length > 0) {
           let message = '⚖️ **История веса**\n\n';
           weightRecords.slice(0, 15).forEach((record, index) => {
-            const date = new Date(record.date).toLocaleDateString('ru-RU');
+            const date = new Date(record.recorded_at || record.created_at).toLocaleDateString('ru-RU');
             message += `${index + 1}. ${record.value} кг - ${date}\n`;
           });
           
@@ -1254,7 +1254,7 @@ ${workflowContext.lastResponse}
       }
 
       try {
-        await saveFitnessMetric(dbUser.id, 'weight', weight);
+        await saveFitnessMetric(dbUser.id, 'weight', weight, 'kg');
         userStates.delete(user.id);
         
         await bot.sendMessage(
@@ -1539,6 +1539,21 @@ async function handleCallbackQuery(bot, callbackQuery) {
       return;
     }
 
+    // Обработка AI инструментов через callback
+    if (data.startsWith('/')) {
+      // Это команда AI инструмента
+      // Создаем фейковое сообщение для обработки как текстовой команды
+      const fakeMessage = {
+        chat: { id: chatId },
+        from: callbackQuery.from,
+        text: data
+      };
+      
+      await bot.answerCallbackQuery(callbackQuery.id, { text: 'Запускаю инструмент...' });
+      await handleTextMessage(bot, fakeMessage);
+      return;
+    }
+
     if (data === 'subscription_menu') {
       const dbUser = await getUserByTelegramId(userId);
       await showSubscriptionMenu(bot, chatId, dbUser.id, messageId);
@@ -1705,8 +1720,7 @@ async function showSubscriptionMenu(bot, chatId, userId, messageId = null) {
       }
     } else {
       message += `❌ **Нет активной подписки**\n\n`;
-      message += `🆓 Бесплатные запросы: ${freeRequests.used}/${freeRequests.limit}\n`;
-      message += `📅 Сброс: каждые 24 часа\n\n`;
+      message += `🆓 Бесплатные запросы: ${freeRequests.used}/${freeRequests.limit}\n\n`;
       message += `💎 **Доступные планы:**\n`;
       message += `• 🥉 Базовый - 150₽ (100 запросов/месяц)\n`;
       message += `• 🥈 Стандарт - 300₽ (300 запросов/месяц)\n`;
