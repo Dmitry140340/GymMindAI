@@ -3,9 +3,9 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const DEEPSEEK_API_BASE_URL = 'https://api.deepseek.com';
-const DEEPSEEK_API_KEY = 'sk-0945e3cceec44d19a48557dfbe13cfc0';
-const DEEPSEEK_MODEL = 'deepseek-reasoner';
+const DEEPSEEK_API_BASE_URL = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com';
+const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || 'sk-0945e3cceec44d19a48557dfbe13cfc0';
+const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-reasoner';
 
 // Хранилище истории разговоров для каждого пользователя
 const conversationHistory = new Map();
@@ -23,6 +23,19 @@ export async function runDeepSeekChat(accessToken, message, userId, instructions
     console.log('🚀 Запуск DeepSeek Chat для пользователя:', userId);
     console.log('💬 Сообщение:', message);
     console.log('📋 Инструкции:', instructions);
+    console.log('🔑 API Key:', DEEPSEEK_API_KEY ? 'Установлен' : '❌ Отсутствует');
+    console.log('🌐 Base URL:', DEEPSEEK_API_BASE_URL);
+    console.log('🤖 Model:', DEEPSEEK_MODEL);
+
+    // Проверка наличия API ключа
+    if (!DEEPSEEK_API_KEY || DEEPSEEK_API_KEY === 'your_api_key_here') {
+      console.error('❌ DeepSeek API ключ не настроен!');
+      return {
+        success: false,
+        message: '🔑 **Ошибка конфигурации**\n\nDeepSeek API ключ не настроен.\nОбратитесь к администратору.',
+        error: 'API ключ не настроен'
+      };
+    }
 
     // Получаем или создаем историю разговора для пользователя
     let messages = conversationHistory.get(userId) || [];
