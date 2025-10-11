@@ -75,7 +75,7 @@ export async function runDeepSeekChat(accessToken, message, userId, instructions
     );
 
     console.log('📥 Ответ DeepSeek - статус:', response.status);
-    console.log('📄 Полный ответ DeepSeek:', JSON.stringify(response.data, null, 2));
+    // НЕ выводим полный ответ - содержит reasoning_content
 
     // Обработка ответа
     if (response.data && response.data.choices && response.data.choices.length > 0) {
@@ -86,8 +86,8 @@ export async function runDeepSeekChat(accessToken, message, userId, instructions
       const reasoningContent = assistantMessage.reasoning_content;
       const finalAnswer = assistantMessage.content;
 
-      console.log('🧠 Reasoning content:', reasoningContent ? reasoningContent.substring(0, 100) + '...' : 'Нет');
-      console.log('✅ Финальный ответ:', finalAnswer ? finalAnswer.substring(0, 100) + '...' : 'Нет');
+      // НЕ выводим reasoning content - только для внутренней работы модели
+      console.log('✅ Финальный ответ получен, длина:', finalAnswer?.length || 0, 'символов');
 
       // Сохраняем в историю ТОЛЬКО финальный ответ (content), БЕЗ reasoning_content
       // Это важно по документации DeepSeek!
