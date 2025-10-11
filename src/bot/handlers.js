@@ -35,7 +35,7 @@
   getUserPayments
 } from '../services/database.js';
 import { runWorkflow, getConversationId, clearConversation, continueInteractiveWorkflow } from '../services/coze.js';
-import { runCozeChat } from '../services/coze_v3.js';
+import { runDeepSeekChat, clearConversationHistory } from '../services/deepseek.js';
 import { createSubscriptionPayment } from '../services/payment.js';
 import { analyzeUserProgress, formatProgressReport } from '../services/progress-analyzer.js';
 import { 
@@ -1306,6 +1306,9 @@ async function handleTextMessage(bot, msg) {
       userWorkflowContext.delete(user.id);
       userInteractiveWorkflow.delete(user.id);
       
+      // Очищаем историю разговора в DeepSeek
+      clearConversationHistory(user.id);
+      
       await bot.sendMessage(
         chatId,
         '🔄 **Диалог сброшен!**\n\n' +
@@ -1828,9 +1831,9 @@ ${workflowContext.lastResponse}
 Пожалуйста, ответь на уточняющий вопрос с учетом контекста предыдущего анализа.`;
       }
 
-      console.log(`📝 Отправляем уточняющий вопрос в Coze API для пользователя ${user.id}`);
+      console.log(`📝 Отправляем уточняющий вопрос в DeepSeek API для пользователя ${user.id}`);
       
-      const aiResponse = await runCozeChat(user.access_token, messageWithContext, user.id, 'Отвечай как персональный фитнес‑тренер и эксперт по питанию: будь конкретным, структурируй ответы списками, используй контекст предыдущего анализа.');
+      const aiResponse = await runDeepSeekChat(user.access_token, messageWithContext, user.id, 'Отвечай как персональный фитнес‑тренер и эксперт по питанию: будь конкретным, структурируй ответы списками, используй контекст предыдущего анализа.');
 
       // Удаляем сообщение "думает"
       try {
