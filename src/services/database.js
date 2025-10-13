@@ -230,6 +230,25 @@ export async function initDatabase() {
           }
         });
 
+        // Миграция: добавляем колонку description в user_goals
+        db.all(`PRAGMA table_info(user_goals)`, (pragmaErr, columns) => {
+          if (!pragmaErr && columns) {
+            const hasDescription = columns.some(col => col.name === 'description');
+            
+            if (!hasDescription) {
+              db.run(`ALTER TABLE user_goals ADD COLUMN description TEXT`, (alterErr) => {
+                if (alterErr) {
+                  console.log('Ошибка добавления колонки description в user_goals:', alterErr.message);
+                } else {
+                  console.log('✅ Добавлена колонка description в таблицу user_goals');
+                }
+              });
+            } else {
+              console.log('✅ Колонка description в user_goals уже существует');
+            }
+          }
+        });
+
         // Миграция: добавляем новые поля для детальных тренировок
         db.all(`PRAGMA table_info(workouts)`, (pragmaErr, columns) => {
           if (!pragmaErr && columns) {
@@ -323,7 +342,8 @@ export async function initDatabase() {
           CREATE TABLE IF NOT EXISTS user_goals (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
-            goal_type TEXT NOT NULL, -- 'weight_loss', 'muscle_gain', 'endurance', 'strength'
+            goal_type TEXT, -- 'weight_loss', 'muscle_gain', 'endurance', 'strength'
+            description TEXT, -- Текстовое описание цели
             target_value REAL,
             current_value REAL,
             target_date DATE,
@@ -918,12 +938,12 @@ export async function getUserStats(userId, days = 30) {
 }
 
 // Добавление/обновление цели
-export async function setUserGoal(userId, goalType, targetValue, targetDate = null) {
+export async function setUserGoal(userId, description, goalType = null, targetValue = null, targetDate = null) {
   return new Promise((resolve, reject) => {
-    // Сначала деактивируем старую цель этого типа
+    // Деактивируем старые цели с таким же описанием
     db.run(
-      `UPDATE user_goals SET status = 'replaced' WHERE user_id = ? AND goal_type = ? AND status = 'active'`,
-      [userId, goalType],
+      `UPDATE user_goals SET status = 'replaced' WHERE user_id = ? AND status = 'active'`,
+      [userId],
       (err) => {
         if (err) {
           reject(err);
@@ -932,11 +952,11 @@ export async function setUserGoal(userId, goalType, targetValue, targetDate = nu
         
         // Добавляем новую цель
         const query = `
-          INSERT INTO user_goals (user_id, goal_type, target_value, target_date)
-          VALUES (?, ?, ?, ?)
+          INSERT INTO user_goals (user_id, description, goal_type, target_value, target_date)
+          VALUES (?, ?, ?, ?, ?)
         `;
         
-        db.run(query, [userId, goalType, targetValue, targetDate], function(insertErr) {
+        db.run(query, [userId, description, goalType, targetValue, targetDate], function(insertErr) {
           if (insertErr) {
             reject(insertErr);
             return;
