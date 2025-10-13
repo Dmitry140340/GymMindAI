@@ -4,8 +4,13 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const DEEPSEEK_API_BASE_URL = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com';
-const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || 'sk-0945e3cceec44d19a48557dfbe13cfc0';
+const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-reasoner';
+
+if (!DEEPSEEK_API_KEY) {
+  console.error('❌ DEEPSEEK_API_KEY не найден в .env файле!');
+  throw new Error('DEEPSEEK_API_KEY is required');
+}
 
 // Хранилище истории разговоров для каждого пользователя
 const conversationHistory = new Map();
