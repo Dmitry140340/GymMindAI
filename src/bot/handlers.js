@@ -1679,8 +1679,14 @@ async function handleTextMessage(bot, msg) {
       await bot.sendMessage(chatId, '📊 Анализирую ваш прогресс...');
       
       try {
-        const progressReport = await analyzeUserProgress(dbUser.id);
-        const formattedReport = await formatProgressReport(progressReport);
+        const progressResult = await analyzeUserProgress(user.id);
+        
+        if (!progressResult.success) {
+          await bot.sendMessage(chatId, '❌ ' + (progressResult.error || 'Ошибка при анализе прогресса'));
+          return;
+        }
+        
+        const formattedReport = formatProgressReport(progressResult.data);
         
         await sendLongMessage(bot, chatId, formattedReport, mainKeyboard);
       } catch (error) {

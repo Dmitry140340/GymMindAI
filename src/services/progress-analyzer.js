@@ -60,7 +60,9 @@ export async function analyzeUserProgress(userId) {
  * Анализирует прогресс по весу
  */
 function analyzeWeightProgress(metrics) {
-  const weightData = metrics.filter(m => m.type === 'weight').sort((a, b) => new Date(a.date) - new Date(b.date));
+  const weightData = metrics
+    .filter(m => m.metric_type === 'weight')
+    .sort((a, b) => new Date(a.recorded_at) - new Date(b.recorded_at));
   
   if (weightData.length === 0) {
     return {
@@ -84,7 +86,7 @@ function analyzeWeightProgress(metrics) {
   
   // Анализ тенденций за последние 30 дней
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  const recentData = weightData.filter(w => new Date(w.date) >= thirtyDaysAgo);
+  const recentData = weightData.filter(w => new Date(w.recorded_at) >= thirtyDaysAgo);
   
   let trend = 'stable';
   if (recentData.length >= 2) {
@@ -101,7 +103,7 @@ function analyzeWeightProgress(metrics) {
     changePercent: weightChangePercent,
     trend: trend,
     totalRecords: weightData.length,
-    daysTracked: Math.ceil((new Date(weightData[weightData.length - 1].date) - new Date(weightData[0].date)) / (1000 * 60 * 60 * 24))
+    daysTracked: Math.ceil((new Date(weightData[weightData.length - 1].recorded_at) - new Date(weightData[0].recorded_at)) / (1000 * 60 * 60 * 24))
   };
 }
 
@@ -122,15 +124,19 @@ function analyzeWorkoutProgress(workouts) {
   let totalExercises = 0;
 
   workouts.forEach(workout => {
-    const type = workout.type || 'Другое';
+    const type = workout.workout_type || 'Другое';
     workoutTypes[type] = (workoutTypes[type] || 0) + 1;
-    totalDuration += workout.duration || 0;
+    totalDuration += workout.duration_minutes || 0;
     
     // Подсчет упражнений для силовых тренировок
-    if (workout.exercises) {
+    if (workout.workout_details) {
       try {
-        const exercises = JSON.parse(workout.exercises);
-        totalExercises += exercises.length;
+        const details = typeof workout.workout_details === 'string' 
+          ? JSON.parse(workout.workout_details) 
+          : workout.workout_details;
+        if (details.exercises) {
+          totalExercises += details.exercises.length;
+        }
       } catch (e) {
         // Игнорируем ошибки парсинга
       }
@@ -138,15 +144,19 @@ function analyzeWorkoutProgress(workouts) {
   });
 
   // Анализ частоты тренировок
-  const sortedWorkouts = workouts.sort((a, b) => new Date(a.date) - new Date(b.date));
-  const firstWorkout = new Date(sortedWorkouts[0].date);
-  const lastWorkout = new Date(sortedWorkouts[sortedWorkouts.length - 1].date);
+  const sortedWorkouts = workouts.sort((a, b) => 
+    new Date(a.completed_at || a.created_at) - new Date(b.completed_at || b.created_at)
+  );
+  const firstWorkout = new Date(sortedWorkouts[0].completed_at || sortedWorkouts[0].created_at);
+  const lastWorkout = new Date(sortedWorkouts[sortedWorkouts.length - 1].completed_at || sortedWorkouts[sortedWorkouts.length - 1].created_at);
   const totalDays = Math.ceil((lastWorkout - firstWorkout) / (1000 * 60 * 60 * 24)) || 1;
   const frequency = (workouts.length / totalDays * 7).toFixed(1); // тренировок в неделю
 
   // Анализ последних 30 дней
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  const recentWorkouts = workouts.filter(w => new Date(w.date) >= thirtyDaysAgo);
+  const recentWorkouts = workouts.filter(w => 
+    new Date(w.completed_at || w.created_at) >= thirtyDaysAgo
+  );
 
   return {
     status: 'has_data',
@@ -158,7 +168,9 @@ function analyzeWorkoutProgress(workouts) {
     workoutTypes: workoutTypes,
     recentWorkouts: recentWorkouts.length,
     daysActive: totalDays,
-    mostFrequentType: Object.keys(workoutTypes).reduce((a, b) => workoutTypes[a] > workoutTypes[b] ? a : b)
+    mostFrequentType: Object.keys(workoutTypes).length > 0 
+      ? Object.keys(workoutTypes).reduce((a, b) => workoutTypes[a] > workoutTypes[b] ? a : b)
+      : 'Нет данных'
   };
 }
 
@@ -177,10 +189,13 @@ function analyzeGoalProgress(goals, metrics, workouts) {
     let progress = 0;
     let status = 'in_progress';
 
+    // Анализ прогресса в зависимости от типа цели или описания
+    const goalText = (goal.description || goal.goal_type || '').toLowerCase();
+    
     // Анализ прогресса в зависимости от типа цели
-    if (goal.goal_type.includes('вес') && goal.goal_type.includes('Снизить')) {
-      const weightData = metrics.filter(m => m.type === 'weight').sort((a, b) => new Date(b.date) - new Date(a.date));
-      if (weightData.length > 0) {
+    if (goalText.includes('вес') && goalText.includes('снизить')) {
+      const weightData = metrics.filter(m => m.metric_type === 'weight').sort((a, b) => new Date(b.recorded_at) - new Date(a.recorded_at));
+      if (weightData.length > 0 && goal.target_value && goal.current_value) {
         const currentWeight = weightData[0].value;
         const targetWeight = parseFloat(goal.target_value);
         const startWeight = parseFloat(goal.current_value);
@@ -195,9 +210,9 @@ function analyzeGoalProgress(goals, metrics, workouts) {
           else status = 'needs_attention';
         }
       }
-    } else if (goal.goal_type.includes('массу') && goal.goal_type.includes('Набрать')) {
-      const weightData = metrics.filter(m => m.type === 'weight').sort((a, b) => new Date(b.date) - new Date(a.date));
-      if (weightData.length > 0) {
+    } else if (goalText.includes('массу') && goalText.includes('набрать')) {
+      const weightData = metrics.filter(m => m.metric_type === 'weight').sort((a, b) => new Date(b.recorded_at) - new Date(a.recorded_at));
+      if (weightData.length > 0 && goal.target_value && goal.current_value) {
         const currentWeight = weightData[0].value;
         const targetWeight = parseFloat(goal.target_value);
         const startWeight = parseFloat(goal.current_value);
@@ -215,7 +230,9 @@ function analyzeGoalProgress(goals, metrics, workouts) {
     } else {
       // Для других целей анализируем по активности тренировок
       const goalDate = new Date(goal.created_at);
-      const workoutsSinceGoal = workouts.filter(w => new Date(w.date) >= goalDate);
+      const workoutsSinceGoal = workouts.filter(w => 
+        new Date(w.completed_at || w.created_at) >= goalDate
+      );
       
       if (workoutsSinceGoal.length >= 10) {
         progress = 80;

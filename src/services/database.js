@@ -234,8 +234,60 @@ export async function initDatabase() {
         db.all(`PRAGMA table_info(user_goals)`, (pragmaErr, columns) => {
           if (!pragmaErr && columns) {
             const hasDescription = columns.some(col => col.name === 'description');
+            const goalTypeColumn = columns.find(col => col.name === 'goal_type');
             
-            if (!hasDescription) {
+            // Проверяем, требуется ли миграция структуры
+            const needsMigration = goalTypeColumn && goalTypeColumn.notnull === 1;
+            
+            if (needsMigration) {
+              console.log('🔄 Выполняем миграцию таблицы user_goals: goal_type NOT NULL -> NULL');
+              
+              // Создаем новую таблицу с правильной схемой
+              db.run(`
+                CREATE TABLE IF NOT EXISTS user_goals_new (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  user_id INTEGER NOT NULL,
+                  goal_type TEXT,
+                  description TEXT,
+                  target_value REAL,
+                  current_value REAL,
+                  target_date DATE,
+                  status TEXT DEFAULT 'active',
+                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  FOREIGN KEY (user_id) REFERENCES users (id)
+                )
+              `, (createErr) => {
+                if (createErr) {
+                  console.log('Ошибка создания новой таблицы user_goals:', createErr.message);
+                } else {
+                  // Копируем данные
+                  db.run(`
+                    INSERT INTO user_goals_new (id, user_id, goal_type, description, target_value, current_value, target_date, status, created_at, updated_at)
+                    SELECT id, user_id, goal_type, description, target_value, current_value, target_date, status, created_at, updated_at FROM user_goals
+                  `, (copyErr) => {
+                    if (copyErr) {
+                      console.log('Ошибка копирования данных user_goals:', copyErr.message);
+                    } else {
+                      // Удаляем старую таблицу и переименовываем новую
+                      db.run(`DROP TABLE user_goals`, (dropErr) => {
+                        if (dropErr) {
+                          console.log('Ошибка удаления старой таблицы user_goals:', dropErr.message);
+                        } else {
+                          db.run(`ALTER TABLE user_goals_new RENAME TO user_goals`, (renameErr) => {
+                            if (renameErr) {
+                              console.log('Ошибка переименования таблицы user_goals:', renameErr.message);
+                            } else {
+                              console.log('✅ Миграция таблицы user_goals завершена успешно');
+                            }
+                          });
+                        }
+                      });
+                    }
+                  });
+                }
+              });
+            } else if (!hasDescription) {
               db.run(`ALTER TABLE user_goals ADD COLUMN description TEXT`, (alterErr) => {
                 if (alterErr) {
                   console.log('Ошибка добавления колонки description в user_goals:', alterErr.message);
@@ -244,7 +296,7 @@ export async function initDatabase() {
                 }
               });
             } else {
-              console.log('✅ Колонка description в user_goals уже существует');
+              console.log('✅ Таблица user_goals уже имеет правильную схему');
             }
           }
         });
